@@ -79,6 +79,7 @@ function toPublic(doc: ScanMemoryDoc) {
     leadReasons: doc.leadReasons ?? [],
     nextAction: doc.nextAction ?? null,
     followUpStatus: doc.followUpStatus ?? "new",
+    followUpChannel: doc.followUpChannel ?? null,
     sentAt: doc.sentAt ?? null,
     editedOutreach: doc.editedOutreach ?? null,
     missionSnapshot: doc.missionSnapshot ?? null,
@@ -112,6 +113,7 @@ function fieldsOf(doc: ScanMemoryDoc): ScanMemoryFields {
     leadReasons: doc.leadReasons ?? [],
     nextAction: doc.nextAction ?? null,
     followUpStatus: doc.followUpStatus ?? "new",
+    followUpChannel: doc.followUpChannel ?? null,
     sentAt: doc.sentAt ?? null,
     editedOutreach: doc.editedOutreach ?? null,
     missionSnapshot: doc.missionSnapshot ?? null,
@@ -335,6 +337,7 @@ export const updateFollowUpStatus = mutation({
   args: {
     id: v.string(),
     status: v.string(),
+    channel: v.optional(v.union(v.string(), v.null())),
     editedOutreach: v.optional(v.union(outreachDraftValidator, v.null())),
     sentAt: v.optional(v.union(v.number(), v.null())),
   },
@@ -347,6 +350,7 @@ export const updateFollowUpStatus = mutation({
 
     const status = FOLLOW_UP_STATUSES.has(args.status) ? args.status : "new";
     const patch: Partial<ScanMemoryDoc> = { followUpStatus: status };
+    if (args.channel !== undefined) patch.followUpChannel = args.channel;
     if (args.editedOutreach !== undefined) patch.editedOutreach = args.editedOutreach;
     if (status === "sent") patch.sentAt = args.sentAt ?? Date.now();
     else if (args.sentAt !== undefined) patch.sentAt = args.sentAt;

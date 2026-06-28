@@ -84,6 +84,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
     var leadReasons: [String]
     var nextAction: String?
     var followUpStatus: FollowUpStatus
+    var followUpChannel: FollowUpChannel?
     var sentAt: Double?
     var editedOutreach: OutreachDraftDTO?
     var missionSnapshot: MissionProfileDTO?
@@ -93,7 +94,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         case linkedinUrl, email, confidence, confidenceScore, sources, notes
         case badgeText, outreach, firstScannedAt, lastScannedAt, scanCount
         case clientId, leadPriority, leadScore, leadReasons, nextAction
-        case followUpStatus, sentAt, editedOutreach, missionSnapshot
+        case followUpStatus, followUpChannel, sentAt, editedOutreach, missionSnapshot
     }
 
     init(
@@ -122,6 +123,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         leadReasons: [String] = [],
         nextAction: String? = nil,
         followUpStatus: FollowUpStatus = .new,
+        followUpChannel: FollowUpChannel? = nil,
         sentAt: Double? = nil,
         editedOutreach: OutreachDraftDTO? = nil,
         missionSnapshot: MissionProfileDTO? = nil
@@ -151,6 +153,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         self.leadReasons = leadReasons
         self.nextAction = nextAction
         self.followUpStatus = followUpStatus
+        self.followUpChannel = followUpChannel
         self.sentAt = sentAt
         self.editedOutreach = editedOutreach
         self.missionSnapshot = missionSnapshot
@@ -184,6 +187,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         leadReasons = (try? c.decode([String].self, forKey: .leadReasons)) ?? []
         nextAction = try c.decodeIfPresent(String.self, forKey: .nextAction)
         followUpStatus = (try? c.decode(FollowUpStatus.self, forKey: .followUpStatus)) ?? .new
+        followUpChannel = try c.decodeIfPresent(FollowUpChannel.self, forKey: .followUpChannel)
         sentAt = try c.decodeIfPresent(Double.self, forKey: .sentAt)
         editedOutreach = try c.decodeIfPresent(OutreachDraftDTO.self, forKey: .editedOutreach)
         missionSnapshot = try c.decodeIfPresent(MissionProfileDTO.self, forKey: .missionSnapshot)
@@ -257,6 +261,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         leadReasons: [String]? = nil,
         nextAction: String?? = nil,
         followUpStatus: FollowUpStatus? = nil,
+        followUpChannel: FollowUpChannel?? = nil,
         sentAt: Double?? = nil,
         editedOutreach: OutreachDraftDTO?? = nil,
         missionSnapshot: MissionProfileDTO?? = nil
@@ -287,6 +292,7 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
             leadReasons: leadReasons ?? self.leadReasons,
             nextAction: nextAction ?? self.nextAction,
             followUpStatus: followUpStatus ?? self.followUpStatus,
+            followUpChannel: followUpChannel ?? self.followUpChannel,
             sentAt: sentAt ?? self.sentAt,
             editedOutreach: editedOutreach ?? self.editedOutreach,
             missionSnapshot: missionSnapshot ?? self.missionSnapshot
@@ -303,11 +309,13 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
 
     func replacingFollowUp(
         status: FollowUpStatus,
+        channel: FollowUpChannel?,
         editedOutreach: OutreachDraftDTO?,
         sentAt: Double?
     ) -> ScanMemoryDTO {
         copy(
             followUpStatus: status,
+            followUpChannel: .some(channel),
             sentAt: .some(sentAt),
             editedOutreach: .some(editedOutreach)
         )

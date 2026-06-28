@@ -61,6 +61,7 @@ protocol ReccoBackend: Sendable {
     func updateFollowUpStatus(
         id: String,
         status: FollowUpStatus,
+        channel: FollowUpChannel?,
         editedOutreach: OutreachDraftDTO?,
         sentAt: Double?
     ) async throws -> ScanMemoryDTO?

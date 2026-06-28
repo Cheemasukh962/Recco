@@ -73,6 +73,8 @@ export type ScanMemoryFields = {
   leadReasons: string[];
   nextAction: string | null;
   followUpStatus: string;
+  /** Channel chosen for the (fake) send: linkedin_dm | cold_email | in_person. */
+  followUpChannel: string | null;
   sentAt: number | null;
   editedOutreach: OutreachDraft | null;
   missionSnapshot: MissionSnapshot | null;
@@ -208,6 +210,7 @@ export function mergeMemory(
     leadReasons: existing?.leadReasons ?? [],
     nextAction: existing?.nextAction ?? null,
     followUpStatus: existing?.followUpStatus ?? "new",
+    followUpChannel: existing?.followUpChannel ?? null,
     sentAt: existing?.sentAt ?? null,
     editedOutreach: existing?.editedOutreach ?? null,
     missionSnapshot: existing?.missionSnapshot ?? null,

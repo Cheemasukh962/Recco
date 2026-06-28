@@ -323,11 +323,15 @@ describe("mission + lead http parsers", () => {
     expect(parsed.mission.goalType).toBe("fundraising");
   });
 
-  it("parseFollowUpStatusRequest validates status + parses sent payload", () => {
+  it("parseFollowUpStatusRequest validates status + channel + parses sent payload", () => {
     expect(() => parseFollowUpStatusRequest({ id: "m1", status: "bogus" })).toThrow(HttpError);
+    expect(() =>
+      parseFollowUpStatusRequest({ id: "m1", status: "sent", channel: "carrier_pigeon" }),
+    ).toThrow(HttpError);
     const sent = parseFollowUpStatusRequest({
       id: "m1",
       status: "sent",
+      channel: "linkedin_dm",
       sentAt: 123,
       editedOutreach: {
         linkedinDm: "hi",
@@ -338,6 +342,7 @@ describe("mission + lead http parsers", () => {
       },
     });
     expect(sent.status).toBe("sent");
+    expect(sent.channel).toBe("linkedin_dm");
     expect(sent.sentAt).toBe(123);
     expect(sent.editedOutreach?.linkedinDm).toBe("hi");
   });

@@ -357,10 +357,13 @@ export function parseScoreRequest(body: unknown): {
 
 const FOLLOW_UP_STATUSES = new Set(["new", "drafted", "edited", "sent", "archived"]);
 
+const FOLLOW_UP_CHANNELS = new Set(["linkedin_dm", "cold_email", "in_person"]);
+
 /** Validate the body of `POST /api/brain/memories/follow-up-status`. */
 export function parseFollowUpStatusRequest(body: unknown): {
   id: string;
   status: string;
+  channel?: string | null;
   editedOutreach?: OutreachDraft | null;
   sentAt?: number | null;
 } {
@@ -377,10 +380,19 @@ export function parseFollowUpStatusRequest(body: unknown): {
   const out: {
     id: string;
     status: string;
+    channel?: string | null;
     editedOutreach?: OutreachDraft | null;
     sentAt?: number | null;
   } = { id: root.id, status: root.status };
 
+  if (root.channel === null) {
+    out.channel = null;
+  } else if (typeof root.channel === "string") {
+    if (!FOLLOW_UP_CHANNELS.has(root.channel)) {
+      throw new HttpError(400, '`channel` must be "linkedin_dm" | "cold_email" | "in_person"');
+    }
+    out.channel = root.channel;
+  }
   if (root.editedOutreach === null) {
     out.editedOutreach = null;
   } else if (root.editedOutreach !== undefined) {

@@ -67,6 +67,66 @@ enum FollowUpStatus: String, Codable, Hashable {
     }
 }
 
+/// The channel a follow-up was (fake) sent through. Mirrors the backend
+/// `followUpChannel` string. Decodes leniently to `.linkedinDm`.
+enum FollowUpChannel: String, Codable, Hashable, CaseIterable, Identifiable {
+    case linkedinDm = "linkedin_dm"
+    case coldEmail = "cold_email"
+    case inPerson = "in_person"
+
+    var id: String { rawValue }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = FollowUpChannel(rawValue: raw) ?? .linkedinDm
+    }
+
+    /// Short label for the segmented selector.
+    var tabLabel: String {
+        switch self {
+        case .linkedinDm: return "LinkedIn"
+        case .coldEmail: return "Email"
+        case .inPerson: return "In person"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .linkedinDm: return "bubble.left.and.bubble.right.fill"
+        case .coldEmail: return "envelope.fill"
+        case .inPerson: return "figure.wave"
+        }
+    }
+
+    /// Channel-specific action button label.
+    var sendLabel: String {
+        switch self {
+        case .linkedinDm: return "Send LinkedIn DM"
+        case .coldEmail: return "Send Email"
+        case .inPerson: return "Mark opener used"
+        }
+    }
+
+    /// Past-tense confirmation shown after a (fake) send.
+    var sentLabel: String {
+        switch self {
+        case .linkedinDm: return "Sent · LinkedIn DM"
+        case .coldEmail: return "Sent · Email"
+        case .inPerson: return "Opener used"
+        }
+    }
+
+    /// The mission's preferred action maps to a sensible default channel.
+    static func from(action: PreferredAction?) -> FollowUpChannel {
+        switch action {
+        case .linkedinDm: return .linkedinDm
+        case .coldEmail: return .coldEmail
+        case .inPerson: return .inPerson
+        case .reminder, .none: return .linkedinDm
+        }
+    }
+}
+
 /// A computed lead score (the `/api/brain/memories/score` response shape). On a
 /// saved memory the fields are flattened onto `ScanMemoryDTO`; this mirrors the
 /// backend `LeadScore` for completeness.

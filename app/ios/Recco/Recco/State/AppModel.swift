@@ -770,6 +770,7 @@ final class AppModel {
     func updateFollowUpStatus(
         id: String,
         status: FollowUpStatus,
+        channel: FollowUpChannel? = nil,
         editedOutreach: OutreachDraftDTO? = nil
     ) async {
         let sentAt: Double? = status == .sent ? now() : memory(id: id)?.sentAt
@@ -777,13 +778,14 @@ final class AppModel {
         if let i = scanMemories.firstIndex(where: { $0.id == id }) {
             scanMemories[i] = scanMemories[i].replacingFollowUp(
                 status: status,
+                channel: channel ?? scanMemories[i].followUpChannel,
                 editedOutreach: editedOutreach ?? scanMemories[i].editedOutreach,
                 sentAt: sentAt
             )
         }
         do {
             if let updated = try await backend.updateFollowUpStatus(
-                id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt
+                id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt
             ) {
                 mergeMemoryIntoList(updated)
             }

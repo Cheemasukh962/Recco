@@ -12,7 +12,9 @@ struct BrainMemoryDetailView: View {
     @State private var didSeedNotes = false
     @State private var copiedLabel: String?
 
-    // Outreach editing / sending.
+    // Follow-up: channel selection + editing / sending.
+    @State private var channel: FollowUpChannel = .linkedinDm
+    @State private var didSeedFollowUp = false
     @State private var editing = false
     @State private var draft = OutreachDraftDTO(
         linkedinDm: "", coldEmailSubject: "", coldEmail: "", inPersonOpener: ""
@@ -39,7 +41,7 @@ struct BrainMemoryDetailView: View {
                     }
                 }
                 .padding(20)
-                .onAppear { seedNotes(memory) }
+                .onAppear { seedNotes(memory); seedFollowUp(memory) }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.circle").font(.title2)
@@ -212,108 +214,99 @@ struct BrainMemoryDetailView: View {
         }
     }
 
-    // MARK: - Outreach (editable + fake send)
+    // MARK: - Follow-up (one channel, one draft, fake send)
 
     private func outreachSection(_ memory: ScanMemoryDTO) -> some View {
         section("Follow-up") {
             VStack(alignment: .leading, spacing: 10) {
-                if let current = memory.effectiveOutreach {
-                    let shown = editing ? draft : current
-                    outreachControls(memory)
-                    editableField("LinkedIn DM", text: shown.linkedinDm, binding: $draft.linkedinDm, multiline: true)
-                    editableField("Cold email subject", text: shown.coldEmailSubject, binding: $draft.coldEmailSubject, multiline: false)
-                    editableField("Cold email", text: shown.coldEmail, binding: $draft.coldEmail, multiline: true)
-                    editableField("In-person opener", text: shown.inPersonOpener, binding: $draft.inPersonOpener, multiline: true)
+                if memory.effectiveOutreach != nil {
+                    channelSelector
+                    draftCard(memory)
+                    controlsRow(memory)
                 } else {
                     generateButton(memory)
-                    Text("Generate a mission-aware LinkedIn DM, cold email, and in-person opener.")
+                    Text("Generate a mission-aware LinkedIn DM, cold email, and in-person opener — then pick one channel to send.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                 }
             }
         }
     }
 
-    private func outreachControls(_ memory: ScanMemoryDTO) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                if editing {
-                    saveEdits(memory)
-                } else {
-                    draft = memory.effectiveOutreach ?? draft
-                    editing = true
-                }
-            } label: {
-                Label(editing ? "Done" : "Edit", systemImage: editing ? "checkmark" : "pencil")
-                    .font(.caption.weight(.bold)).foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Theme.surfaceStrong, in: Capsule())
-            }
-            .buttonStyle(.plain)
-
-            Button { Task { await appModel.generateOutreach(memoryId: memory.id) } } label: {
-                Image(systemName: appModel.isGeneratingOutreach ? "arrow.triangle.2.circlepath" : "sparkles")
-                    .font(.caption.weight(.bold)).foregroundStyle(Theme.textSecondary)
-                    .frame(width: 34, height: 34)
-                    .background(Theme.surface, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(appModel.isGeneratingOutreach || editing)
-            .accessibilityLabel("Regenerate outreach")
-
-            Spacer()
-            sendButton(memory)
-        }
-    }
-
-    private func sendButton(_ memory: ScanMemoryDTO) -> some View {
-        Group {
-            if memory.isSent {
-                Label("Sent", systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.bold)).foregroundStyle(.black)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(LeadStyle.sent, in: Capsule())
-                    .transition(.scale.combined(with: .opacity))
-            } else {
-                Button { send(memory) } label: {
-                    HStack(spacing: 6) {
-                        if sending { ProgressView().tint(.black) }
-                        else { Image(systemName: "paperplane.fill") }
-                        Text(sending ? "Sending…" : "Send")
+    /// Segmented channel picker — only the chosen channel's draft is shown.
+    private var channelSelector: some View {
+        HStack(spacing: 4) {
+            ForEach(FollowUpChannel.allCases) { ch in
+                let active = channel == ch
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { channel = ch; editing = false }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: ch.systemImage).font(.system(size: 11, weight: .semibold))
+                        Text(ch.tabLabel).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .font(.caption.weight(.bold)).foregroundStyle(.black)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Theme.accent, in: Capsule())
+                    .foregroundStyle(active ? .black : Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.clear), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .disabled(sending)
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: memory.isSent)
+        .padding(4)
+        .background(Theme.surface, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
     }
 
-    private func editableField(_ title: String, text: String, binding: Binding<String>, multiline: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// One focused draft card for the selected channel (subject + body for email).
+    private func draftCard(_ memory: ScanMemoryDTO) -> some View {
+        let current = memory.effectiveOutreach ?? draft
+        let shown = editing ? draft : current
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(title.uppercased()).font(.caption2.weight(.bold)).foregroundStyle(Theme.textTertiary)
+                Label(channel.tabLabel, systemImage: channel.systemImage)
+                    .font(.caption2.weight(.bold)).foregroundStyle(Theme.textTertiary)
                 Spacer()
                 Button {
-                    UIPasteboard.general.string = text
-                    withAnimation(.easeOut(duration: 0.15)) { copiedLabel = title }
+                    UIPasteboard.general.string = copyText(shown)
+                    withAnimation(.easeOut(duration: 0.15)) { copiedLabel = channel.rawValue }
                 } label: {
-                    Image(systemName: copiedLabel == title ? "checkmark" : "doc.on.doc")
+                    Image(systemName: copiedLabel == channel.rawValue ? "checkmark" : "doc.on.doc")
                         .font(.caption.weight(.bold)).foregroundStyle(Theme.textSecondary)
                         .frame(width: 28, height: 28).background(Theme.surface, in: Circle())
                 }
-                .accessibilityLabel("Copy \(title)")
+                .accessibilityLabel("Copy \(channel.tabLabel)")
+            }
+            if channel == .coldEmail {
+                fieldEditor("Subject", text: shown.coldEmailSubject, binding: $draft.coldEmailSubject, minHeight: 0, single: true)
+                fieldEditor("Body", text: shown.coldEmail, binding: $draft.coldEmail, minHeight: 120, single: false)
+            } else {
+                fieldEditor(nil, text: bodyText(shown), binding: channelBinding, minHeight: 90, single: false)
+            }
+        }
+        .padding(12)
+        .glassCard(corner: 12)
+    }
+
+    private var channelBinding: Binding<String> {
+        switch channel {
+        case .linkedinDm: return $draft.linkedinDm
+        case .coldEmail: return $draft.coldEmail
+        case .inPerson: return $draft.inPersonOpener
+        }
+    }
+
+    @ViewBuilder
+    private func fieldEditor(_ label: String?, text: String, binding: Binding<String>, minHeight: CGFloat, single: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let label {
+                Text(label.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textTertiary)
             }
             if editing {
                 Group {
-                    if multiline {
-                        TextEditor(text: binding)
-                            .frame(minHeight: 64)
-                            .scrollContentBackground(.hidden)
-                    } else {
+                    if single {
                         TextField("", text: binding, axis: .vertical)
+                    } else {
+                        TextEditor(text: binding).frame(minHeight: minHeight).scrollContentBackground(.hidden)
                     }
                 }
                 .font(.caption).foregroundStyle(Theme.textPrimary)
@@ -327,8 +320,74 @@ struct BrainMemoryDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(12)
-        .glassCard(corner: 12)
+    }
+
+    private func controlsRow(_ memory: ScanMemoryDTO) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                if editing { saveEdits(memory) }
+                else { draft = memory.effectiveOutreach ?? draft; editing = true }
+            } label: {
+                Label(editing ? "Done" : "Edit", systemImage: editing ? "checkmark" : "pencil")
+                    .font(.caption.weight(.bold)).foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.surfaceStrong, in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button { Task { await appModel.generateOutreach(memoryId: memory.id) } } label: {
+                Image(systemName: appModel.isGeneratingOutreach ? "arrow.triangle.2.circlepath" : "sparkles")
+                    .font(.caption.weight(.bold)).foregroundStyle(Theme.textSecondary)
+                    .frame(width: 34, height: 34).background(Theme.surface, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(appModel.isGeneratingOutreach || editing)
+            .accessibilityLabel("Regenerate")
+
+            Spacer()
+            sendButton(memory)
+        }
+    }
+
+    private func sendButton(_ memory: ScanMemoryDTO) -> some View {
+        Group {
+            if memory.isSent {
+                Label((memory.followUpChannel ?? channel).sentLabel, systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.bold)).foregroundStyle(.black)
+                    .padding(.horizontal, 13).padding(.vertical, 9)
+                    .background(LeadStyle.sent, in: Capsule())
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                Button { send(memory) } label: {
+                    HStack(spacing: 6) {
+                        if sending { ProgressView().tint(.black) }
+                        else { Image(systemName: channel == .inPerson ? "checkmark.circle.fill" : "paperplane.fill") }
+                        Text(sending ? "Sending…" : channel.sendLabel)
+                    }
+                    .font(.caption.weight(.bold)).foregroundStyle(.black)
+                    .padding(.horizontal, 13).padding(.vertical, 9)
+                    .background(Theme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(sending)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: memory.isSent)
+    }
+
+    private func bodyText(_ o: OutreachDraftDTO) -> String {
+        switch channel {
+        case .linkedinDm: return o.linkedinDm
+        case .coldEmail: return o.coldEmail
+        case .inPerson: return o.inPersonOpener
+        }
+    }
+
+    private func copyText(_ o: OutreachDraftDTO) -> String {
+        switch channel {
+        case .coldEmail: return "Subject: \(o.coldEmailSubject)\n\n\(o.coldEmail)"
+        default: return bodyText(o)
+        }
     }
 
     private func generateButton(_ memory: ScanMemoryDTO) -> some View {
@@ -358,17 +417,18 @@ struct BrainMemoryDetailView: View {
 
     private func saveEdits(_ memory: ScanMemoryDTO) {
         editing = false
-        Task { await appModel.updateFollowUpStatus(id: memory.id, status: .edited, editedOutreach: draft) }
+        Task { await appModel.updateFollowUpStatus(id: memory.id, status: .edited, channel: channel, editedOutreach: draft) }
     }
 
-    /// Fake send: a short animated delay, then mark the memory sent. No email or
-    /// LinkedIn message is ever actually sent.
+    /// Fake send: a short animated delay, then mark the memory sent through the
+    /// selected channel and lock in the final text. No email or LinkedIn message
+    /// is ever actually sent.
     private func send(_ memory: ScanMemoryDTO) {
-        let edited = editing ? draft : nil
+        let finalText = editing ? draft : memory.effectiveOutreach
         sending = true
         Task {
             try? await Task.sleep(for: .milliseconds(850))
-            await appModel.updateFollowUpStatus(id: memory.id, status: .sent, editedOutreach: edited)
+            await appModel.updateFollowUpStatus(id: memory.id, status: .sent, channel: channel, editedOutreach: finalText)
             editing = false
             sending = false
         }
@@ -405,6 +465,16 @@ struct BrainMemoryDetailView: View {
         guard !didSeedNotes else { return }
         notesDraft = memory.notes ?? ""
         didSeedNotes = true
+    }
+
+    /// Default the channel to the one already sent, else the mission's preferred
+    /// action; seed the editable draft from the current outreach.
+    private func seedFollowUp(_ memory: ScanMemoryDTO) {
+        guard !didSeedFollowUp else { return }
+        channel = memory.followUpChannel
+            ?? FollowUpChannel.from(action: memory.nextAction.flatMap(PreferredAction.init(rawValue:)))
+        if let current = memory.effectiveOutreach { draft = current }
+        didSeedFollowUp = true
     }
 
     private func clean(_ s: String?) -> String? {

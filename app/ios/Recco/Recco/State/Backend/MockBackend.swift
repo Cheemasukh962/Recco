@@ -155,11 +155,12 @@ final class MockBackend: ReccoBackend {
     func updateFollowUpStatus(
         id: String,
         status: FollowUpStatus,
+        channel: FollowUpChannel?,
         editedOutreach: OutreachDraftDTO?,
         sentAt: Double?
     ) async throws -> ScanMemoryDTO? {
         try? await Task.sleep(for: .milliseconds(120))
-        return memoryStore.updateFollowUp(id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt)
+        return memoryStore.updateFollowUp(id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt)
     }
 
     func generateScanMemoryOutreach(
@@ -220,6 +221,7 @@ private final class MockMemoryStore: @unchecked Sendable {
     func updateFollowUp(
         id: String,
         status: FollowUpStatus,
+        channel: FollowUpChannel?,
         editedOutreach: OutreachDraftDTO?,
         sentAt: Double?
     ) -> ScanMemoryDTO? {
@@ -228,6 +230,7 @@ private final class MockMemoryStore: @unchecked Sendable {
         let resolvedSentAt = status == .sent ? (sentAt ?? Date().timeIntervalSince1970 * 1000) : (sentAt ?? memories[i].sentAt)
         memories[i] = memories[i].replacingFollowUp(
             status: status,
+            channel: channel ?? memories[i].followUpChannel,
             editedOutreach: editedOutreach ?? memories[i].editedOutreach,
             sentAt: resolvedSentAt
         )

@@ -153,13 +153,17 @@ final class ConvexBackend: ReccoBackend {
     func updateFollowUpStatus(
         id: String,
         status: FollowUpStatus,
+        channel: FollowUpChannel?,
         editedOutreach: OutreachDraftDTO?,
         sentAt: Double?
     ) async throws -> ScanMemoryDTO? {
         guard hasBackend else {
-            return try await fallback.updateFollowUpStatus(id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt)
+            return try await fallback.updateFollowUpStatus(id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt)
         }
-        let body = FollowUpStatusRequest(id: id, status: status.rawValue, editedOutreach: editedOutreach, sentAt: sentAt)
+        let body = FollowUpStatusRequest(
+            id: id, status: status.rawValue, channel: channel?.rawValue,
+            editedOutreach: editedOutreach, sentAt: sentAt
+        )
         return try await post("/api/brain/memories/follow-up-status", body: body, as: NullableScanMemory.self).value
     }
 
@@ -322,6 +326,7 @@ final class ConvexBackend: ReccoBackend {
     private struct FollowUpStatusRequest: Encodable {
         let id: String
         let status: String
+        let channel: String?
         let editedOutreach: OutreachDraftDTO?
         let sentAt: Double?
     }

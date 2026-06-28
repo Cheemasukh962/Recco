@@ -113,6 +113,7 @@ export default defineSchema({
     leadReasons: v.optional(v.array(v.string())),
     nextAction: v.optional(v.union(v.string(), v.null())),
     followUpStatus: v.optional(v.union(v.string(), v.null())),
+    followUpChannel: v.optional(v.union(v.string(), v.null())),
     sentAt: v.optional(v.union(v.number(), v.null())),
     editedOutreach: v.optional(v.union(outreachDraftValidator, v.null())),
     missionSnapshot: v.optional(v.union(missionSnapshotValidator, v.null())),
