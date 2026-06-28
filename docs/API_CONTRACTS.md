@@ -435,6 +435,39 @@ Fallback:
 
 If temporary token setup is slow, Person 4 can use manual chips or a typed command bar for demo.
 
+## HTTP bridge (iOS ↔ backend)
+
+iOS calls the backend over plain HTTP/JSON (`URLSession`) via a thin bridge in
+`backend/convex/http.ts`. These routes are **1:1 wrappers** over the Convex
+functions above — **the DTO shapes are unchanged**; this section only documents
+the transport. See `backend/README.md` for base-URL details and curl examples.
+
+Base URL = the Convex **HTTP actions** URL (`CONVEX_SITE_URL`), i.e. the
+`.convex.site` host (locally `http://127.0.0.1:3211`) — **not** the `.convex.cloud`
+client URL.
+
+| Method & path | Wraps | Request body | Response |
+|---|---|---|---|
+| `GET /api/health` | — | — | `{ ok: true, service: "recco-backend", time: number }` |
+| `GET /api/people` | `people:list` | — | `Person[]` without `faceEmbedding` |
+| `GET /api/state` | `state:get` | — | `BrainState` |
+| `POST /api/state/filter` | `state:setFilter` | `{ command: FilterCommand }` | `BrainState` |
+| `POST /api/voice/interpret` | `voice:interpretCommand` | `{ transcript, visiblePersonIds? }` | `FilterCommand` |
+| `POST /api/drafts/opener` | `drafts:createOpener` | `{ personId, userGoal? }` | `DraftResult` |
+| `POST /api/vision/match-face` | `vision:matchFace` | `{ imageBase64, imageMimeType?, trackId? }` | `FaceMatchResult` |
+
+Transport rules:
+
+- All responses are JSON with `Access-Control-Allow-Origin: *`; every route
+  answers `OPTIONS` preflight (`204`).
+- Errors are JSON: `{ "ok": false, "error": string }`. Status: `200` ok,
+  `400` invalid input, `404` unknown route, `500` unexpected error.
+- `vision/match-face` enforces the matching safety rule: only `matched` and
+  `tentative` carry a `personId`; `unknown` / `no_face` / `error` always have
+  `personId: null`. Show an overlay name **only** for `status === "matched"`.
+- `vision/match-face` request convenience: `imageMimeType` defaults to
+  `image/jpeg`; `trackId` is generated when omitted.
+
 ## iOS internal interfaces
 
 iOS should define Swift models matching the shared types:
