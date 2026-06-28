@@ -62,6 +62,18 @@ final class AppModel {
     /// no live backend — the app runs on the local fallback.
     private let apiBaseURL: URL?
 
+    /// Deepgram streaming-token endpoint (`<base>/api/voice/deepgram-token`), or
+    /// `nil` when voice can't run: no backend URL, or fully-offline `mockAll`.
+    /// The Deepgram key never lives on-device; this only mints a short-lived
+    /// token from Person B's backend.
+    var deepgramTokenEndpoint: URL? {
+        guard demoMode != .mockAll, let base = apiBaseURL else { return nil }
+        return base.appendingPathComponent("api/voice/deepgram-token")
+    }
+
+    /// Whether press-to-talk voice can run in the current mode/config.
+    var isVoiceAvailable: Bool { deepgramTokenEndpoint != nil }
+
     // MARK: - Convenience accessors (mirror the BrainState fields)
 
     var activeFilter: FilterCommandDTO { state.activeFilter }
@@ -328,11 +340,21 @@ final class AppModel {
     // MARK: - Identity resolution ("find info on him")
 
     /// Phrases that route to the identity lane instead of the filter parser.
+    /// Matched as case-insensitive substrings, so each entry also covers its
+    /// longer variants (e.g. "find me info" covers "find me information about
+    /// this person", "who is this" covers "who is this person").
     private static let identityPhrases = [
-        "find info", "who is he", "who is she", "who is this",
-        "find info on this person", "who's that", "who is that",
-        "get his linkedin", "get her linkedin", "his linkedin", "her linkedin",
-        "look him up", "look her up", "find out who",
+        // "find info(rmation)" family
+        "find info", "find me info", "find some info", "find information",
+        "find out who", "find out about",
+        // "who is …" family
+        "who is he", "who is she", "who is this", "who is that",
+        "who's this", "who's that", "who am i looking at",
+        // look-up family
+        "look him up", "look her up", "look them up",
+        "look this person up", "look up this", "look up who",
+        // anyone asking for a LinkedIn is asking us to identify the person
+        "linkedin",
     ]
 
     /// True when a transcript should trigger "find info on him".
@@ -406,6 +428,110 @@ final class AppModel {
         // A dismissed scan should also stop the ribbon's "Finding info…" spinner,
         // even if an in-flight resolve is still settling in the background.
         isResolvingIdentity = false
+    }
+
+    // MARK: - Voice (Deepgram press-to-talk)
+
+    /// True while the mic is actively streaming to Deepgram.
+    private(set) var isListening = false
+    /// Live transcript shown while listening (accumulated finals + current
+    /// partial). Updated on every result; commands never run off this.
+    private(set) var partialTranscript = ""
+    /// The committed transcript captured at stop; shown briefly as "Processing…"
+    /// while `runCommand` handles it, then cleared.
+    private(set) var finalTranscript = ""
+    /// Non-fatal voice error (e.g. Deepgram not configured). Cleared on next start.
+    private(set) var voiceError: String?
+
+    /// Active speech client + accumulated segments. Observation-ignored: these
+    /// are plumbing, not rendered state.
+    @ObservationIgnored private var speechClient: DeepgramSpeechClient?
+    @ObservationIgnored private var finalSegments: [String] = []
+    @ObservationIgnored private var currentPartial = ""
+
+    /// The full transcript so far: finalized segments plus the in-flight partial.
+    private var combinedTranscript: String {
+        (finalSegments + (currentPartial.isEmpty ? [] : [currentPartial]))
+            .joined(separator: " ")
+    }
+
+    /// Begin streaming mic audio to Deepgram. Live results update
+    /// `partialTranscript`; nothing runs until `stopListening()`. If voice is
+    /// unavailable (offline mode / no backend / stub token) this surfaces a
+    /// non-fatal `voiceError` and the typed bar remains the fallback.
+    func startListening() {
+        guard !isListening else { return }
+        voiceError = nil
+        finalTranscript = ""
+        partialTranscript = ""
+        finalSegments = []
+        currentPartial = ""
+
+        guard let endpoint = deepgramTokenEndpoint else {
+            voiceError = "Voice unavailable — set RECCO_API_BASE_URL and use Live or Mock CV."
+            return
+        }
+
+        let client = DeepgramSpeechClient(tokenEndpoint: endpoint)
+        speechClient = client
+        isListening = true
+
+        // Callbacks are delivered on the main queue by the client, so it is safe
+        // to assume main-actor isolation and update state synchronously in order.
+        Task {
+            await client.start(
+                onTranscript: { [weak self] text, isFinal in
+                    MainActor.assumeIsolated { self?.ingestTranscript(text, isFinal: isFinal) }
+                },
+                onError: { [weak self] error in
+                    MainActor.assumeIsolated { self?.handleVoiceError(error) }
+                }
+            )
+        }
+    }
+
+    /// Stop streaming. When `run` is true and we captured anything, run the final
+    /// transcript through the shared command pipeline exactly once.
+    func stopListening(run: Bool = true) {
+        let wasActive = isListening || speechClient != nil
+        isListening = false
+        speechClient?.stop()
+        speechClient = nil
+        guard wasActive else { return }
+
+        let captured = combinedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        partialTranscript = ""
+        finalSegments = []
+        currentPartial = ""
+
+        guard run, !captured.isEmpty else { finalTranscript = ""; return }
+        finalTranscript = captured
+        Task {
+            await runCommand(captured)
+            // Drop the "Processing…" line once handled (unless a new capture began).
+            if finalTranscript == captured { finalTranscript = "" }
+        }
+    }
+
+    private func ingestTranscript(_ text: String, isFinal: Bool) {
+        guard isListening else { return }
+        if isFinal {
+            finalSegments.append(text)
+            currentPartial = ""
+        } else {
+            currentPartial = text
+        }
+        partialTranscript = combinedTranscript
+    }
+
+    private func handleVoiceError(_ error: Error) {
+        if let dg = error as? DeepgramSpeechClient.DeepgramError {
+            voiceError = dg.errorDescription ?? "Voice unavailable."
+        } else {
+            voiceError = error.localizedDescription
+        }
+        // Non-fatal: drop the mic and keep the typed fallback. Don't auto-run.
+        stopListening(run: false)
     }
 
     // MARK: - Helpers

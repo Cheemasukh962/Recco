@@ -171,15 +171,25 @@ final class DeepgramSpeechClient {
     private func openSocket(token: String) throws {
         var components = URLComponents(string: "wss://api.deepgram.com/v1/listen")
         components?.queryItems = [
+            // nova-3 is Deepgram's current best general model; it falls back
+            // gracefully and is available to the same token grant as nova-2.
+            URLQueryItem(name: "model", value: "nova-3"),
+            URLQueryItem(name: "language", value: "en-US"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: String(Int(sampleRate))),
             URLQueryItem(name: "channels", value: "1"),
-            URLQueryItem(name: "punctuate", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
+            URLQueryItem(name: "punctuate", value: "true"),
+            URLQueryItem(name: "smart_format", value: "true"),
+            // Auto-finalize a segment after ~700ms of silence so press-to-talk
+            // yields finals even if the caller releases a hair early.
+            URLQueryItem(name: "endpointing", value: "700"),
         ]
         guard let url = components?.url else { throw DeepgramError.socketFailed("bad URL") }
         var request = URLRequest(url: url)
-        request.setValue("Token \(token)", forHTTPHeaderField: "Authorization")
+        // Temporary tokens minted by `/v1/auth/grant` authenticate with Bearer,
+        // not the `Token` scheme used by raw API keys (which stay backend-only).
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let task = URLSession.shared.webSocketTask(with: request)
         socket = task
         task.resume()
@@ -217,7 +227,12 @@ final class DeepgramSpeechClient {
             let transcript = alternatives.first?["transcript"] as? String,
             !transcript.isEmpty
         else { return }
-        let isFinal = (json["is_final"] as? Bool) ?? false
+        // Deepgram marks a segment finalized with `is_final`; `speech_final`
+        // additionally signals an endpoint (the speaker paused). Either means
+        // this segment text is stable and safe to accumulate. The caller treats
+        // non-final results as live partials and never runs a command on them.
+        let isFinal = ((json["is_final"] as? Bool) ?? false)
+            || ((json["speech_final"] as? Bool) ?? false)
         let callback = onTranscript
         DispatchQueue.main.async { callback?(transcript, isFinal) }
     }
