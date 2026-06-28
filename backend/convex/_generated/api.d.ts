@@ -9,6 +9,7 @@
  */
 
 import type * as drafts from "../drafts.js";
+import type * as gtm from "../gtm.js";
 import type * as http from "../http.js";
 import type * as identity from "../identity.js";
 import type * as lib_config from "../lib/config.js";
@@ -16,6 +17,8 @@ import type * as lib_cv from "../lib/cv.js";
 import type * as lib_demoRoster from "../lib/demoRoster.js";
 import type * as lib_fiber from "../lib/fiber.js";
 import type * as lib_filter from "../lib/filter.js";
+import type * as lib_gtmIntent from "../lib/gtmIntent.js";
+import type * as lib_gtmProspects from "../lib/gtmProspects.js";
 import type * as lib_http from "../lib/http.js";
 import type * as lib_identityScoring from "../lib/identityScoring.js";
 import type * as lib_leadScoring from "../lib/leadScoring.js";
@@ -48,6 +51,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   drafts: typeof drafts;
+  gtm: typeof gtm;
   http: typeof http;
   identity: typeof identity;
   "lib/config": typeof lib_config;
@@ -55,6 +59,8 @@ declare const fullApi: ApiFromModules<{
   "lib/demoRoster": typeof lib_demoRoster;
   "lib/fiber": typeof lib_fiber;
   "lib/filter": typeof lib_filter;
+  "lib/gtmIntent": typeof lib_gtmIntent;
+  "lib/gtmProspects": typeof lib_gtmProspects;
   "lib/http": typeof lib_http;
   "lib/identityScoring": typeof lib_identityScoring;
   "lib/leadScoring": typeof lib_leadScoring;

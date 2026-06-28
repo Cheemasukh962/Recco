@@ -31,6 +31,9 @@ import {
   optionsResponse,
   parseFilterRequest,
   parseFollowUpStatusRequest,
+  parseGTMOutreachRequest,
+  parseGTMRunRequest,
+  parseGTMStatusRequest,
   parseIdentityResolveRequest,
   parseInterpretRequest,
   parseMatchFaceRequest,
@@ -246,6 +249,59 @@ route(
   jsonAction(async (ctx, request) => {
     const args = parseGenerateOutreachRequest(await readJsonBody(request));
     return ctx.runAction(api.scanMemories.generateOutreach, args);
+  }),
+);
+
+// --- POST /api/gtm/run  -> { run, prospects } -------------------------------
+route(
+  "/api/gtm/run",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseGTMRunRequest(await readJsonBody(request));
+    return ctx.runAction(api.gtm.run, args);
+  }),
+);
+
+// --- GET /api/gtm/runs?clientId=...  -> GTMRun[] -----------------------------
+route(
+  "/api/gtm/runs",
+  "GET",
+  jsonAction(async (ctx, request) => {
+    const clientId = new URL(request.url).searchParams.get("clientId");
+    if (!clientId) throw new HttpError(400, "`clientId` query param is required");
+    return ctx.runQuery(api.gtm.listRuns, { clientId });
+  }),
+);
+
+// --- GET /api/gtm/prospects?clientId=...&runId=...  -> GTMProspect[] ---------
+route(
+  "/api/gtm/prospects",
+  "GET",
+  jsonAction(async (ctx, request) => {
+    const params = new URL(request.url).searchParams;
+    const clientId = params.get("clientId");
+    if (!clientId) throw new HttpError(400, "`clientId` query param is required");
+    return ctx.runQuery(api.gtm.listProspects, { clientId, runId: params.get("runId") });
+  }),
+);
+
+// --- POST /api/gtm/prospects/outreach  -> OutreachDraft ----------------------
+route(
+  "/api/gtm/prospects/outreach",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseGTMOutreachRequest(await readJsonBody(request));
+    return ctx.runAction(api.gtm.generateOutreach, args);
+  }),
+);
+
+// --- POST /api/gtm/prospects/status  -> GTMProspect | null -------------------
+route(
+  "/api/gtm/prospects/status",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseGTMStatusRequest(await readJsonBody(request));
+    return ctx.runMutation(api.gtm.updateProspectStatus, args);
   }),
 );
 

@@ -195,6 +195,65 @@ export const leadScoreValidator = v.object({
   scoredAt: v.number(),
 });
 
+// ---------------------------------------------------------------------------
+// Lazy GTM / Scout Mode.
+// ---------------------------------------------------------------------------
+
+/** Validator for a parsed GTM intent. */
+export const gtmIntentValidator = v.object({
+  rawText: v.string(),
+  goalType: v.string(),
+  searchQuery: v.string(),
+  targetRoles: v.array(v.string()),
+  targetKeywords: v.array(v.string()),
+  targetCompanies: v.array(v.string()),
+  targetIndustries: v.array(v.string()),
+  count: v.number(),
+  preferredAction: v.string(),
+});
+
+/** Public GTM search run returned to iOS. */
+export const gtmRunValidator = v.object({
+  id: v.string(),
+  clientId: v.string(),
+  rawText: v.string(),
+  parsedIntent: v.optional(v.union(gtmIntentValidator, v.null())),
+  goalType: v.string(),
+  query: v.string(),
+  count: v.number(),
+  status: v.string(),
+  errorMessage: v.optional(v.union(v.string(), v.null())),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+/** Public GTM prospect returned to iOS (text/links/scores only, never images). */
+export const gtmProspectValidator = v.object({
+  id: v.string(),
+  runId: v.string(),
+  clientId: v.string(),
+  prospectId: v.string(),
+  name: v.string(),
+  headline: v.optional(v.union(v.string(), v.null())),
+  role: v.optional(v.union(v.string(), v.null())),
+  company: v.optional(v.union(v.string(), v.null())),
+  location: v.optional(v.union(v.string(), v.null())),
+  linkedinUrl: v.optional(v.union(v.string(), v.null())),
+  email: v.optional(v.union(v.string(), v.null())),
+  profilePhotoUrl: v.optional(v.union(v.string(), v.null())),
+  source: v.string(),
+  matchScore: v.number(),
+  priority: v.string(),
+  reasons: v.array(v.string()),
+  missingInfo: v.array(v.string()),
+  outreach: v.optional(v.union(outreachDraftValidator, v.null())),
+  selectedChannel: v.optional(v.union(v.string(), v.null())),
+  status: v.string(),
+  sentAt: v.optional(v.union(v.number(), v.null())),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
 /**
  * Validator for a public scan memory returned to iOS. `id` is the Convex
  * document id as a string. Dedup keys are NOT exposed. Metadata/links/scores

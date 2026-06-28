@@ -329,6 +329,32 @@ export async function findCandidates(
   return [];
 }
 
+/**
+ * Scout-mode prospect search: Fiber natural-language search for a GTM request
+ * ("Find Swift engineers in ai"). Throws on transport failure; returns [] when
+ * Fiber finds nothing. Reuses the same tolerant parser as identity lookups.
+ */
+export async function searchProspects(
+  query: string,
+  count: number,
+  opts: FiberClientOptions,
+): Promise<IdentityCandidate[]> {
+  if (!opts.config.apiKey) throw new Error("Fiber: no API key configured");
+  const raw = await postFiberJson(
+    `${opts.config.baseUrl}/v1/nlp-search/run`,
+    {
+      apiKey: opts.config.apiKey,
+      query,
+      pageSize: count,
+      getDetailedEducation: false,
+      getDetailedWorkExperience: false,
+    },
+    "nlp-search",
+    opts,
+  );
+  return parseFiberPeople(raw, "fiber:nlp-search");
+}
+
 /** Tolerantly build a linkedinUrl(lowercased) -> photoUrl map. */
 function parseProfilePicMap(raw: unknown): Record<string, string> {
   const map: Record<string, string> = {};

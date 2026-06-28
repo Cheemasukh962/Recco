@@ -138,6 +138,7 @@ const GOAL_RULES: GoalRule[] = [
     goalType: "hiring",
     match: [
       "hiring",
+      "hire ",
       "recruit",
       "looking to hire",
       "find engineers",

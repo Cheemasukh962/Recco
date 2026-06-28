@@ -15,6 +15,7 @@ import {
   brainStateValidator,
   faceMatchResultValidator,
   filterCommandValidator,
+  gtmIntentValidator,
   missionCoreValidator,
   missionSnapshotValidator,
   outreachDraftValidator,
@@ -129,6 +130,48 @@ export default defineSchema({
     clientId: v.string(),
     ...missionCoreValidator.fields,
   }).index("by_clientId", ["clientId"]),
+
+  // Lazy GTM / Scout Mode: a voice/text request -> a search run + AI-found
+  // prospects. Kept separate from scanMemories (real people the user met).
+  gtmRuns: defineTable({
+    clientId: v.string(),
+    rawText: v.string(),
+    parsedIntent: v.optional(v.union(gtmIntentValidator, v.null())),
+    goalType: v.string(),
+    query: v.string(),
+    count: v.number(),
+    status: v.string(), // "running" | "ready" | "error"
+    errorMessage: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_clientId_createdAt", ["clientId", "createdAt"]),
+
+  gtmProspects: defineTable({
+    runId: v.string(),
+    clientId: v.string(),
+    prospectId: v.string(),
+    name: v.string(),
+    headline: v.optional(v.union(v.string(), v.null())),
+    role: v.optional(v.union(v.string(), v.null())),
+    company: v.optional(v.union(v.string(), v.null())),
+    location: v.optional(v.union(v.string(), v.null())),
+    linkedinUrl: v.optional(v.union(v.string(), v.null())),
+    email: v.optional(v.union(v.string(), v.null())),
+    profilePhotoUrl: v.optional(v.union(v.string(), v.null())),
+    source: v.string(),
+    matchScore: v.number(),
+    priority: v.string(),
+    reasons: v.array(v.string()),
+    missingInfo: v.array(v.string()),
+    outreach: v.optional(v.union(outreachDraftValidator, v.null())),
+    selectedChannel: v.optional(v.union(v.string(), v.null())),
+    status: v.string(), // "new" | "drafted" | "sent" | "archived"
+    sentAt: v.optional(v.union(v.number(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_runId", ["runId"])
+    .index("by_clientId_createdAt", ["clientId", "createdAt"]),
 });
 
 // Re-export so callers can build args that match the stored filter shape.

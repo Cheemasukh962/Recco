@@ -447,6 +447,101 @@ export function parseGenerateOutreachRequest(body: unknown): {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Lazy GTM / Scout Mode parsers.
+// ---------------------------------------------------------------------------
+
+const GTM_PROSPECT_STATUSES = new Set(["new", "drafted", "sent", "archived"]);
+const GTM_CHANNELS = new Set(["linkedin_dm", "cold_email", "in_person"]);
+
+/** Validate the body of `POST /api/gtm/run`. */
+export function parseGTMRunRequest(body: unknown): {
+  clientId: string;
+  transcript: string;
+  count?: number | null;
+} {
+  const root = asObject(body);
+  if (typeof root.clientId !== "string" || root.clientId.length === 0) {
+    throw new HttpError(400, "`clientId` must be a non-empty string");
+  }
+  const transcript = typeof root.transcript === "string" ? root.transcript : "";
+  if (!transcript.trim()) {
+    throw new HttpError(400, "`transcript` must be a non-empty string");
+  }
+  const out: { clientId: string; transcript: string; count?: number | null } = {
+    clientId: root.clientId,
+    transcript,
+  };
+  if (root.count === null || typeof root.count === "number") {
+    out.count = root.count as number | null;
+  }
+  return out;
+}
+
+/** Validate the body of `POST /api/gtm/prospects/outreach`. */
+export function parseGTMOutreachRequest(body: unknown): {
+  id: string;
+  eventName?: string | null;
+  senderName?: string | null;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  const out: { id: string; eventName?: string | null; senderName?: string | null } = {
+    id: root.id,
+  };
+  if (root.eventName === null || typeof root.eventName === "string") {
+    out.eventName = root.eventName as string | null;
+  }
+  if (root.senderName === null || typeof root.senderName === "string") {
+    out.senderName = root.senderName as string | null;
+  }
+  return out;
+}
+
+/** Validate the body of `POST /api/gtm/prospects/status`. */
+export function parseGTMStatusRequest(body: unknown): {
+  id: string;
+  status: string;
+  channel?: string | null;
+  editedOutreach?: OutreachDraft | null;
+  sentAt?: number | null;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  if (typeof root.status !== "string" || !GTM_PROSPECT_STATUSES.has(root.status)) {
+    throw new HttpError(400, '`status` must be one of "new" | "drafted" | "sent" | "archived"');
+  }
+  const out: {
+    id: string;
+    status: string;
+    channel?: string | null;
+    editedOutreach?: OutreachDraft | null;
+    sentAt?: number | null;
+  } = { id: root.id, status: root.status };
+
+  if (root.channel === null) {
+    out.channel = null;
+  } else if (typeof root.channel === "string") {
+    if (!GTM_CHANNELS.has(root.channel)) {
+      throw new HttpError(400, '`channel` must be "linkedin_dm" | "cold_email" | "in_person"');
+    }
+    out.channel = root.channel;
+  }
+  if (root.editedOutreach === null) {
+    out.editedOutreach = null;
+  } else if (root.editedOutreach !== undefined) {
+    out.editedOutreach = parseOutreachDraft(root.editedOutreach);
+  }
+  if (root.sentAt === null || typeof root.sentAt === "number") {
+    out.sentAt = root.sentAt as number | null;
+  }
+  return out;
+}
+
 /**
  * Defensive safety net for face matches crossing the HTTP boundary: only a
  * `matched` or `tentative` result may carry a `personId`. `unknown` / `no_face`
