@@ -134,6 +134,8 @@ final class AppModel {
             // Keep the already-seeded roster; just say why it's local.
             statusMessage = "Using local roster (\(error.localizedDescription))"
         }
+        // Load the Brain event memory in the background; never blocks the roster.
+        Task { await loadScanMemories() }
     }
 
     private func ingest(people: [PersonDTO]) {
@@ -409,6 +411,9 @@ final class AppModel {
             )
             identityResult = result
             identityStatusMessage = result.message ?? result.confidenceLabel
+            // Auto-save into Brain event memory in the background — never blocks
+            // the camera UI or the result sheet.
+            Task { await saveIdentityResultToBrain(result, transcript: transcript) }
         } catch {
             identityResult = IdentityResolveResultDTO(
                 trackId: trackId, status: .error,
@@ -532,6 +537,130 @@ final class AppModel {
         }
         // Non-fatal: drop the mic and keep the typed fallback. Don't auto-run.
         stopListening(run: false)
+    }
+
+    // MARK: - Brain (event memory)
+
+    /// All saved scan memories, newest first.
+    private(set) var scanMemories: [ScanMemoryDTO] = []
+    /// True while (re)loading the memory list.
+    private(set) var isLoadingBrain = false
+    /// Non-fatal Brain error (list/notes/outreach).
+    private(set) var brainError: String?
+    /// True while outreach is being generated for the open memory.
+    private(set) var isGeneratingOutreach = false
+    /// The memory currently open in the Brain detail surface.
+    var selectedMemoryId: String?
+
+    /// Event/sender context woven into generated outreach. Overridable via env
+    /// for a specific demo (e.g. `RECCO_EVENT_NAME=Orange Slice`).
+    private static let eventName: String =
+        ProcessInfo.processInfo.environment["RECCO_EVENT_NAME"] ?? "the event"
+    private static let senderName: String =
+        ProcessInfo.processInfo.environment["RECCO_SENDER_NAME"] ?? "Pranav"
+
+    /// The memory open in the detail surface, looked up live so edits/outreach
+    /// re-render it.
+    var selectedMemory: ScanMemoryDTO? {
+        guard let id = selectedMemoryId else { return nil }
+        return scanMemories.first { $0.id == id }
+    }
+
+    func memory(id: String) -> ScanMemoryDTO? {
+        scanMemories.first { $0.id == id }
+    }
+
+    /// Load the saved scan memories from the active backend.
+    func loadScanMemories() async {
+        isLoadingBrain = true
+        brainError = nil
+        do {
+            scanMemories = try await backend.listScanMemories()
+        } catch {
+            brainError = error.localizedDescription
+        }
+        isLoadingBrain = false
+    }
+
+    /// Pull-to-refresh / refresh button entry point.
+    func refreshBrain() async { await loadScanMemories() }
+
+    /// Persist an identity result into Brain memory (deduped server-side). Best
+    /// effort: a failure never affects the camera/result UI. Skips info-less
+    /// results so the Brain doesn't fill with noise.
+    func saveIdentityResultToBrain(_ result: IdentityResolveResultDTO, transcript: String?) async {
+        let best = result.bestCandidate
+        let clue = result.clue
+        let name = best?.fullName ?? clue?.fullName
+        let hasName = !(name?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+        let hasCandidate = best != nil
+        // Skip pure errors / empty needs-clarification with nothing to remember.
+        if !hasName && !hasCandidate { return }
+        if result.status == .error && !hasCandidate { return }
+
+        let badge = (clue?.rawText.isEmpty == false) ? clue?.rawText : nil
+        let input = ScanMemoryInputDTO(
+            scanId: result.trackId,
+            status: result.status.rawValue,
+            name: name,
+            headline: best?.headline,
+            role: best?.role ?? clue?.role,
+            company: best?.company ?? clue?.company,
+            school: best?.school ?? clue?.school,
+            linkedinUrl: best?.linkedinUrl,
+            email: best?.email,
+            confidenceScore: result.verification?.score ?? clue?.confidence,
+            personId: nil,
+            transcript: transcript,
+            badgeText: badge,
+            hadFaceVerification: result.verification?.faceDetected ?? false,
+            candidateCount: result.candidates.count
+        )
+        do {
+            let saved = try await backend.upsertScanMemory(input)
+            mergeMemoryIntoList(saved)
+        } catch {
+            // Best-effort: Brain save never interrupts the scan flow.
+        }
+    }
+
+    /// Save (or clear) notes on a memory.
+    func updateMemoryNotes(id: String, notes: String?) async {
+        do {
+            if let updated = try await backend.updateScanMemoryNotes(id: id, notes: notes) {
+                mergeMemoryIntoList(updated)
+            }
+        } catch {
+            brainError = "Couldn't save notes: \(error.localizedDescription)"
+        }
+    }
+
+    /// Generate (and persist) outreach variants for a memory.
+    func generateOutreach(memoryId: String) async {
+        isGeneratingOutreach = true
+        brainError = nil
+        do {
+            let draft = try await backend.generateScanMemoryOutreach(
+                id: memoryId,
+                eventName: AppModel.eventName,
+                senderName: AppModel.senderName
+            )
+            if let i = scanMemories.firstIndex(where: { $0.id == memoryId }) {
+                scanMemories[i] = scanMemories[i].replacingOutreach(draft)
+            }
+        } catch {
+            brainError = "Couldn't generate outreach: \(error.localizedDescription)"
+        }
+        isGeneratingOutreach = false
+    }
+
+    /// Replace an existing memory in place, or insert it at the front.
+    private func mergeMemoryIntoList(_ memory: ScanMemoryDTO) {
+        if let i = scanMemories.firstIndex(where: { $0.id == memory.id }) {
+            scanMemories[i] = memory
+        } else {
+            scanMemories.insert(memory, at: 0)
+        }
     }
 
     // MARK: - Helpers

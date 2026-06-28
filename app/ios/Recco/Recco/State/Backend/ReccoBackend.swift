@@ -30,6 +30,26 @@ protocol ReccoBackend: Sendable {
         faceImageBase64: String,
         contextImageBase64: String
     ) async throws -> IdentityResolveResultDTO
+
+    // MARK: - Brain scan memory ("event memory")
+
+    /// All saved scan memories, newest first (`GET /api/brain/memories`).
+    func listScanMemories() async throws -> [ScanMemoryDTO]
+
+    /// Create/update a memory from an identity result, deduped server-side
+    /// (`POST /api/brain/memories/upsert`). Returns the saved memory.
+    func upsertScanMemory(_ input: ScanMemoryInputDTO) async throws -> ScanMemoryDTO
+
+    /// Save notes onto a memory (`POST /api/brain/memories/notes`).
+    func updateScanMemoryNotes(id: String, notes: String?) async throws -> ScanMemoryDTO?
+
+    /// Generate (and persist) outreach variants for a memory
+    /// (`POST /api/brain/memories/outreach`).
+    func generateScanMemoryOutreach(
+        id: String,
+        eventName: String?,
+        senderName: String?
+    ) async throws -> OutreachDraftDTO
 }
 
 enum BackendError: LocalizedError {

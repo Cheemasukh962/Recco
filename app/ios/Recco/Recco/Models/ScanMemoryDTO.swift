@@ -69,9 +69,9 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
     let confidence: ScanConfidence
     let confidenceScore: Double?
     let sources: [String]
-    let notes: String?
+    var notes: String?
     let badgeText: String?
-    let outreach: OutreachDraftDTO?
+    var outreach: OutreachDraftDTO?
     let firstScannedAt: Double
     let lastScannedAt: Double
     let scanCount: Int
@@ -187,6 +187,39 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
             .compactMap { $0?.lowercased() }
             .joined(separator: " ")
         return haystack.contains(q)
+    }
+
+    /// Copy helper for local/backend updates while keeping the DTO immutable.
+    private func copy(notes: String?, outreach: OutreachDraftDTO?) -> ScanMemoryDTO {
+        ScanMemoryDTO(
+            id: id,
+            scanId: scanId,
+            personId: personId,
+            name: name,
+            headline: headline,
+            role: role,
+            company: company,
+            school: school,
+            linkedinUrl: linkedinUrl,
+            email: email,
+            confidence: confidence,
+            confidenceScore: confidenceScore,
+            sources: sources,
+            notes: notes,
+            badgeText: badgeText,
+            outreach: outreach,
+            firstScannedAt: firstScannedAt,
+            lastScannedAt: lastScannedAt,
+            scanCount: scanCount
+        )
+    }
+
+    func replacingNotes(_ notes: String?) -> ScanMemoryDTO {
+        copy(notes: notes, outreach: outreach)
+    }
+
+    func replacingOutreach(_ outreach: OutreachDraftDTO?) -> ScanMemoryDTO {
+        copy(notes: notes, outreach: outreach)
     }
 }
 

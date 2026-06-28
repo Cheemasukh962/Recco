@@ -106,6 +106,41 @@ final class ConvexBackend: ReccoBackend {
         )
     }
 
+    // MARK: - Brain scan memory
+
+    func listScanMemories() async throws -> [ScanMemoryDTO] {
+        guard hasBackend else { return try await fallback.listScanMemories() }
+        return try await get("/api/brain/memories", as: [ScanMemoryDTO].self)
+    }
+
+    func upsertScanMemory(_ input: ScanMemoryInputDTO) async throws -> ScanMemoryDTO {
+        guard hasBackend else { return try await fallback.upsertScanMemory(input) }
+        return try await post("/api/brain/memories/upsert", body: input, as: ScanMemoryDTO.self)
+    }
+
+    func updateScanMemoryNotes(id: String, notes: String?) async throws -> ScanMemoryDTO? {
+        guard hasBackend else { return try await fallback.updateScanMemoryNotes(id: id, notes: notes) }
+        let body = NotesRequest(id: id, notes: notes)
+        return try await post("/api/brain/memories/notes", body: body, as: NullableScanMemory.self).value
+    }
+
+    func generateScanMemoryOutreach(
+        id: String,
+        eventName: String?,
+        senderName: String?
+    ) async throws -> OutreachDraftDTO {
+        guard hasBackend else {
+            return try await fallback.generateScanMemoryOutreach(id: id, eventName: eventName, senderName: senderName)
+        }
+        let body = OutreachRequest(id: id, eventName: eventName, senderName: senderName)
+        return try await post(
+            "/api/brain/memories/outreach",
+            body: body,
+            as: OutreachDraftDTO.self,
+            timeoutInterval: RequestTimeout.identity
+        )
+    }
+
     // MARK: - HTTP helpers
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
@@ -215,6 +250,27 @@ final class ConvexBackend: ReccoBackend {
         let faceImageBase64: String
         let contextImageBase64: String
         let imageMimeType: String
+    }
+
+    private struct NotesRequest: Encodable {
+        let id: String
+        let notes: String?
+    }
+
+    private struct OutreachRequest: Encodable {
+        let id: String
+        let eventName: String?
+        let senderName: String?
+    }
+
+    /// Decodes a `ScanMemory | null` response (the notes endpoint returns null
+    /// when the id is unknown).
+    private struct NullableScanMemory: Decodable {
+        let value: ScanMemoryDTO?
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            value = container.decodeNil() ? nil : try container.decode(ScanMemoryDTO.self)
+        }
     }
 }
 
