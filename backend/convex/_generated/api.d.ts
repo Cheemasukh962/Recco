@@ -9,10 +9,12 @@
  */
 
 import type * as drafts from "../drafts.js";
+import type * as http from "../http.js";
 import type * as lib_config from "../lib/config.js";
 import type * as lib_cv from "../lib/cv.js";
 import type * as lib_demoRoster from "../lib/demoRoster.js";
 import type * as lib_filter from "../lib/filter.js";
+import type * as lib_http from "../lib/http.js";
 import type * as lib_mockEmbeddings from "../lib/mockEmbeddings.js";
 import type * as lib_openai from "../lib/openai.js";
 import type * as lib_opener from "../lib/opener.js";
@@ -35,10 +37,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   drafts: typeof drafts;
+  http: typeof http;
   "lib/config": typeof lib_config;
   "lib/cv": typeof lib_cv;
   "lib/demoRoster": typeof lib_demoRoster;
   "lib/filter": typeof lib_filter;
+  "lib/http": typeof lib_http;
   "lib/mockEmbeddings": typeof lib_mockEmbeddings;
   "lib/openai": typeof lib_openai;
   "lib/opener": typeof lib_opener;

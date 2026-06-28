@@ -6,7 +6,7 @@ embeddings against enrolled people, interprets voice commands into a structured
 filter, and drafts short openers.
 
 Everything is built to the frozen contract in [`../docs/API_CONTRACTS.md`](../docs/API_CONTRACTS.md)
-and the Person B spec in [`../docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`](../docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md).
+and the Person B spec in [`../docs/planning/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`](../docs/planning/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md).
 
 > **Degrades gracefully with zero secrets.** With no API keys and no CV service,
 > the whole backend runs in a deterministic mock mode that returns the exact
@@ -20,6 +20,7 @@ and the Person B spec in [`../docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONV
 - [Quick start](#quick-start)
 - [What's here](#whats-here)
 - [Function reference (for Persons C & D)](#function-reference-for-persons-c--d)
+- [HTTP bridge for iOS (Person A)](#http-bridge-for-ios-person-a)
 - [Environment variables](#environment-variables)
 - [Seeding & enrollment](#seeding--enrollment)
 - [Verifying without the iOS app](#verifying-without-the-ios-app)
@@ -155,6 +156,126 @@ embeddings):
 - CV reports no face → `no_face`; any thrown error → `error`
 
 Override with `FACE_STRONG_MATCH_SCORE` / `FACE_TENTATIVE_MATCH_SCORE`.
+
+---
+
+## HTTP bridge for iOS (Person A)
+
+iOS talks to the backend over **plain HTTP/JSON** (`URLSession`), not the Convex
+client. The bridge lives in [`convex/http.ts`](convex/http.ts) and wraps the
+exact public functions above — no contract shapes change. Pure request
+validation + response helpers are in [`convex/lib/http.ts`](convex/lib/http.ts)
+(unit-tested in [`test/http.test.ts`](test/http.test.ts)).
+
+### Base URL
+
+Convex serves HTTP actions on a **different URL from the API/client URL**. After
+`npx convex dev`, the deployment writes both to `backend/.env.local`:
+
+```txt
+CONVEX_URL=http://127.0.0.1:3210        # Convex client/API  (NOT the HTTP bridge)
+CONVEX_SITE_URL=http://127.0.0.1:3211   # HTTP actions        <-- iOS base URL
+```
+
+- **Local (anonymous) dev:** base URL is `http://127.0.0.1:3211`.
+- **Cloud deployment:** the HTTP base URL is your deployment's **`.convex.site`**
+  host (e.g. `https://your-deployment-123.convex.site`), i.e. `CONVEX_SITE_URL`.
+  It is `.convex.site`, **not** the `.convex.cloud` client URL.
+
+iOS should set its base URL to `CONVEX_SITE_URL` and append the paths below.
+For the iOS Simulator, `127.0.0.1` reaches the host; for a physical device on
+the same network use the host machine's LAN IP and run a cloud deployment or a
+tunnel.
+
+### Endpoints
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET`  | `/api/health` | — | `{ ok, service, time }` |
+| `GET`  | `/api/people` | — | `PublicPerson[]` (never embeddings) |
+| `GET`  | `/api/state` | — | `BrainState` |
+| `POST` | `/api/state/filter` | `{ command: FilterCommand }` | `BrainState` |
+| `POST` | `/api/voice/interpret` | `{ transcript, visiblePersonIds? }` | `FilterCommand` |
+| `POST` | `/api/drafts/opener` | `{ personId, userGoal? }` | `DraftResult` |
+| `POST` | `/api/vision/match-face` | `{ imageBase64, imageMimeType?, trackId? }` | `FaceMatchResult` |
+
+Behavior:
+
+- **CORS:** every route returns `Access-Control-Allow-Origin: *` and answers
+  `OPTIONS` preflight (`204`) so browsers/local tools can call it directly.
+- **JSON always**, including errors: `{ "ok": false, "error": "..." }`.
+- **Status codes:** `200` success · `400` invalid input / malformed JSON ·
+  `404` unknown route (Convex default) · `500` unexpected error.
+- **match-face safety:** only `matched` / `tentative` carry a `personId`;
+  `unknown` / `no_face` / `error` always return `personId: null`, so iOS can
+  never show a name for a low-confidence face. iOS should show a name **only**
+  for `status === "matched"`.
+- **match-face defaults:** `imageMimeType` defaults to `image/jpeg` and a
+  `trackId` is generated if omitted, so a minimal `{ imageBase64 }` payload works.
+
+### Example curl requests
+
+Base URL below is the local HTTP-actions URL (`CONVEX_SITE_URL`):
+
+```bash
+BASE=http://127.0.0.1:3211
+
+# Health (diagnostics)
+curl "$BASE/api/health"
+
+# Roster (no embeddings)
+curl "$BASE/api/people"
+
+# Reactive state
+curl "$BASE/api/state"
+
+# Apply a filter
+curl -X POST "$BASE/api/state/filter" \
+  -H "Content-Type: application/json" \
+  -d '{"command":{"action":"filter","includeTags":["AI"],"excludeTags":[],"rankBy":"relevance","rawText":"show me ai"}}'
+
+# Interpret a spoken command -> FilterCommand
+curl -X POST "$BASE/api/voice/interpret" \
+  -H "Content-Type: application/json" \
+  -d '{"transcript":"Who should I talk to about infra?","visiblePersonIds":["person_ava_shah"]}'
+
+# Draft an opener -> DraftResult
+curl -X POST "$BASE/api/drafts/opener" \
+  -H "Content-Type: application/json" \
+  -d '{"personId":"person_ava_shah","userGoal":null}'
+
+# Match a face. imageBase64 here is base64("recco-match:person_ava_shah"),
+# which the deterministic mock path resolves to a strong match.
+curl -X POST "$BASE/api/vision/match-face" \
+  -H "Content-Type: application/json" \
+  -d '{"imageBase64":"cmVjY28tbWF0Y2g6cGVyc29uX2F2YV9zaGFo","imageMimeType":"image/jpeg","trackId":"trk_abc123"}'
+```
+
+> **Windows PowerShell note:** PS 5.1 mangles the double quotes inside the JSON
+> `-d` payloads above when calling native `curl.exe`. Run these from **Git Bash**
+> / WSL, or write the JSON to a file and use `curl -d "@body.json"`, or build the
+> body with `ConvertTo-Json` and pass it via `Invoke-RestMethod`:
+>
+> ```powershell
+> $body = @{ command = @{ action = "filter"; includeTags = @("AI"); excludeTags = @(); rankBy = "relevance"; rawText = "show me ai" } } | ConvertTo-Json -Depth 5
+> Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3211/api/state/filter" -ContentType "application/json" -Body $body
+> ```
+
+### Running the bridge
+
+```bash
+cd backend
+# Local backend, no Convex account; serves API on :3210 and HTTP actions on :3211
+CONVEX_AGENT_MODE=anonymous npx convex dev        # macOS/Linux / Git Bash
+#   PowerShell: $env:CONVEX_AGENT_MODE="anonymous"; npx convex dev
+
+# In another terminal: seed the roster, then hit the endpoints above.
+npx convex run seed:run
+curl http://127.0.0.1:3211/api/health
+```
+
+For a cloud deployment, run `npx convex deploy` (or a logged-in `npx convex dev`)
+and use the printed `.convex.site` URL as the iOS base URL.
 
 ---
 
