@@ -1,0 +1,2 @@
+# Generated enrollment embeddings (regenerate with: cd backend && npm run enroll)
+demo-data/embeddings.generated.json

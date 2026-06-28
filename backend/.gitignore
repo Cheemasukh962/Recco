@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Local secrets (never commit). Copy from .env.local.example.
+.env.local
+.env
+
+# Convex local/runtime artifacts
+.convex/
+
+# Build / test output
+dist/
+coverage/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated enrollment embeddings produced by `npm run enroll`.
+# Regenerate locally; not required to be committed.
+demo-data/embeddings.generated.json
