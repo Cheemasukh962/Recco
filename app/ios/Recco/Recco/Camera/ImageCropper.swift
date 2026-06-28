@@ -23,9 +23,12 @@ final class ImageCropper {
 
     /// Crop `normalizedRect` (top-left, 0...1) out of `pixelBuffer` and return a
     /// base64 JPEG at `jpegQuality`. The rect is clamped to the unit square.
+    /// Upscales smaller crops so badge/name-tag text is still readable by OCR.
     func base64JPEG(from pixelBuffer: CVPixelBuffer,
                     normalizedRect: CGRect,
-                    jpegQuality: CGFloat = 0.7) throws -> String {
+                    jpegQuality: CGFloat = 0.85,
+                    targetMinEdge: CGFloat = 900,
+                    maxOutputEdge: CGFloat = 1600) throws -> String {
         let imageWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
         let imageHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
 
@@ -50,8 +53,17 @@ final class ImageCropper {
         let ciCrop = CGRect(x: cropRect.origin.x, y: flippedY,
                             width: cropRect.width, height: cropRect.height)
         let cropped = ciImage.cropped(to: ciCrop)
+        let shortest = min(cropRect.width, cropRect.height)
+        let longest = max(cropRect.width, cropRect.height)
+        var scale = max(1.0, targetMinEdge / max(shortest, 1))
+        if longest * scale > maxOutputEdge {
+            scale = max(1.0, maxOutputEdge / max(longest, 1))
+        }
+        let output = scale > 1
+            ? cropped.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            : cropped
 
-        guard let cg = context.createCGImage(cropped, from: cropped.extent) else {
+        guard let cg = context.createCGImage(output, from: output.extent) else {
             throw CropError.encodeFailed
         }
         guard let data = UIImage(cgImage: cg).jpegData(compressionQuality: jpegQuality) else {

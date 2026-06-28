@@ -406,7 +406,7 @@ final class CameraViewModel {
             contextBase64 = (try? imageCropper.base64JPEG(
                 from: pb,
                 normalizedRect: contextRect(for: target),
-                jpegQuality: 0.7
+                jpegQuality: 0.85
             )) ?? ""
         }
 

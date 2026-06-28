@@ -21,14 +21,19 @@ final class ConvexBackend: ReccoBackend {
     /// Offline fallback that keeps the demo recoverable when no URL is set.
     private let fallback: MockBackend
     private let session: URLSession
+    private enum RequestTimeout {
+        static let standard: TimeInterval = 12
+        static let resource: TimeInterval = 20
+        static let identity: TimeInterval = 70
+    }
 
     init(baseURL: URL?, mode: DemoMode, fallbackPeople: [PersonDTO]) {
         self.baseURL = baseURL
         self.mode = mode
         self.fallback = MockBackend(people: fallbackPeople)
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 12      // fail fast on stage Wi-Fi
-        config.timeoutIntervalForResource = 20
+        config.timeoutIntervalForRequest = RequestTimeout.standard      // fail fast on lightweight calls
+        config.timeoutIntervalForResource = RequestTimeout.resource
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
@@ -93,7 +98,12 @@ final class ConvexBackend: ReccoBackend {
             contextImageBase64: contextImageBase64,
             imageMimeType: "image/jpeg"
         )
-        return try await post("/api/identity/resolve", body: body, as: IdentityResolveResultDTO.self)
+        return try await post(
+            "/api/identity/resolve",
+            body: body,
+            as: IdentityResolveResultDTO.self,
+            timeoutInterval: RequestTimeout.identity
+        )
     }
 
     // MARK: - HTTP helpers
@@ -103,15 +113,33 @@ final class ConvexBackend: ReccoBackend {
         return try await send(request, as: type)
     }
 
-    private func post<Body: Encodable, T: Decodable>(_ path: String, body: Body, as type: T.Type) async throws -> T {
-        let request = try makeRequest(path: path, method: "POST", body: body)
+    private func post<Body: Encodable, T: Decodable>(
+        _ path: String,
+        body: Body,
+        as type: T.Type,
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> T {
+        let request = try makeRequest(
+            path: path,
+            method: "POST",
+            body: body,
+            timeoutInterval: timeoutInterval
+        )
         return try await send(request, as: type)
     }
 
-    private func makeRequest<Body: Encodable>(path: String, method: String, body: Body?) throws -> URLRequest {
+    private func makeRequest<Body: Encodable>(
+        path: String,
+        method: String,
+        body: Body?,
+        timeoutInterval: TimeInterval? = nil
+    ) throws -> URLRequest {
         guard let url = url(for: path) else { throw ConvexBackendError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
