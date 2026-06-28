@@ -71,8 +71,8 @@ function firstArray(
     const val = obj[k];
     if (Array.isArray(val)) return val;
   }
-  // Sometimes nested one level under "output"/"result"/"response".
-  for (const wrapper of ["output", "result", "response", "data"]) {
+  // Fiber endpoints can wrap arrays in envelopes such as output.results.people.
+  for (const wrapper of ["output", "result", "response", "data", "results"]) {
     const inner = obj[wrapper];
     if (inner && typeof inner === "object" && !Array.isArray(inner)) {
       const found = firstArray(inner as Record<string, unknown>, keys);
@@ -102,6 +102,20 @@ function pickNested(
     return undefined;
   }
   return pick(inner as Record<string, unknown>, nestedKeys);
+}
+
+function num(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedScoreFrom(p: Record<string, unknown>): number {
+  const raw = num(
+    pick(p, ["matchScore", "match_score", "score", "relevance_score"]),
+  );
+  if (raw === null) return 0;
+  if (raw <= 1) return Math.max(0, raw);
+  if (raw <= 100) return Math.min(1, raw / 100);
+  return Math.min(1, Math.log10(raw + 1) / 3);
 }
 
 function linkedinUrlFrom(p: Record<string, unknown>): string | null {
@@ -219,7 +233,15 @@ export function parseFiberPeople(
         ]) ?? pickNested(p, "current_job", ["company_name", "companyName"]),
       ),
       school: str(pick(p, ["school", "university", "education"])),
-      location: str(pick(p, ["location", "city", "region", "country"])),
+      location: str(
+        pick(p, ["location", "city", "region", "country"]) ??
+          pickNested(p, "inferred_location", [
+            "formatted_address",
+            "city",
+            "state_name",
+            "country_name",
+          ]),
+      ),
       linkedinUrl,
       email: str(
         pick(p, ["email", "workEmail", "work_email", "contactEmail"]),
@@ -241,7 +263,7 @@ export function parseFiberPeople(
         ]),
       ),
       source,
-      matchScore: 0,
+      matchScore: normalizedScoreFrom(p),
     });
   });
   return out;

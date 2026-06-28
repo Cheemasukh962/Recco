@@ -131,6 +131,42 @@ describe("parseFiberPeople", () => {
     expect(out[0]!.profilePhotoUrl).toBe("https://img/ada.jpg");
   });
 
+  it("maps Fiber nlp-search output.results.people envelope", () => {
+    const out = parseFiberPeople(
+      {
+        output: {
+          results: {
+            people: [
+              {
+                name: "Taylor Chen",
+                primary_slug: "taylor-chen",
+                headline: "iOS Engineer at Northwind",
+                current_job: {
+                  title: "iOS Engineer",
+                  company_name: "Northwind",
+                },
+                inferred_location: {
+                  formatted_address: "San Francisco, CA",
+                },
+                relevance_score: 309.6855,
+              },
+            ],
+          },
+        },
+      },
+      "fiber:nlp-search",
+    );
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.fullName).toBe("Taylor Chen");
+    expect(out[0]!.linkedinUrl).toBe("https://www.linkedin.com/in/taylor-chen");
+    expect(out[0]!.role).toBe("iOS Engineer");
+    expect(out[0]!.company).toBe("Northwind");
+    expect(out[0]!.location).toBe("San Francisco, CA");
+    expect(out[0]!.matchScore).toBeGreaterThan(0.7);
+    expect(out[0]!.source).toBe("fiber:nlp-search");
+  });
+
   it("returns [] for garbage and skips entries without a name", () => {
     expect(parseFiberPeople(null)).toEqual([]);
     expect(parseFiberPeople({ profiles: [{ company: "Acme" }] })).toEqual([]);
