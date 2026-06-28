@@ -50,16 +50,20 @@ struct RootView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
-        // "Find info on him" result.
-        .sheet(item: Binding(
-            get: { appModel.identityResult },
-            set: { if $0 == nil { appModel.clearIdentity() } }
-        )) { result in
-            IdentityResultSheet(result: result)
-                .environment(appModel)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(.ultraThinMaterial)
+        // "Find info on him" — full details. The in-camera hologram panel is the
+        // primary result surface; this sheet is opt-in via the panel's "Details"
+        // button (sets `appModel.showIdentityDetail`).
+        .sheet(isPresented: Binding(
+            get: { appModel.showIdentityDetail && appModel.identityResult != nil },
+            set: { presented in if !presented { appModel.showIdentityDetail = false } }
+        )) {
+            if let result = appModel.identityResult {
+                IdentityResultSheet(result: result)
+                    .environment(appModel)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(.ultraThinMaterial)
+            }
         }
     }
 }

@@ -24,6 +24,24 @@ final class CameraViewModel {
     private(set) var usingSimulatedSource = false
     var statusLine: String?
 
+    // MARK: - AR overlay state
+
+    /// Oriented preview image aspect (width ÷ height). `nil` for the simulated
+    /// source (whose boxes are authored in screen space) → plain-stretch mapping.
+    private(set) var previewImageAspect: CGFloat?
+    /// Current scan stage while resolving an identity; `nil` when idle. Drives the
+    /// hologram panel's scan timeline.
+    private(set) var scanStage: ARScanStage?
+    /// The track the active scan/result panel is anchored to. Survives brief
+    /// detection dropouts so the panel doesn't flicker away mid-scan.
+    private(set) var scanningTrackId: String?
+    /// The resolved identity for the panel (mirrors `appModel.identityResult`).
+    private(set) var scanResult: IdentityResolveResultDTO?
+    private var stageTask: Task<Void, Never>?
+    /// Bumped whenever a scan starts or the panel is dismissed, so a late identity
+    /// resolution from a superseded/cancelled scan can't re-open or mis-anchor the panel.
+    private var scanGeneration = 0
+
     // MARK: - Debug state
     var debugEnabled = false
     var showAllBoxes = false
@@ -36,7 +54,11 @@ final class CameraViewModel {
 
     // MARK: - Dependencies
     private let appModel: AppModel
-    private let session = CameraSession()
+    // Lazy + observation-ignored: CameraView is re-initialized whenever RootView's
+    // body re-evaluates, and `State(initialValue:)` eagerly builds (then discards)
+    // a view model each time. Deferring the AVCaptureSession until it is actually
+    // used (onAppear) keeps those throwaway instances cheap.
+    @ObservationIgnored private lazy var session = CameraSession()
     private let tracker = FaceTracker()
     private let cropper = FaceCropper()
     private let imageCropper = ImageCropper()
@@ -97,6 +119,7 @@ final class CameraViewModel {
 
     func onDisappear() {
         simTask?.cancel()
+        stageTask?.cancel()
         session.stop()
         appModel.identityCaptureHandler = nil
     }
@@ -142,6 +165,11 @@ final class CameraViewModel {
         guard now - lastProcessTime >= minFrameInterval else { return }
         lastProcessTime = now
         latestPixelBuffer = frame.pixelBuffer
+
+        // Oriented buffer dimensions drive the aspect-fill overlay mapping.
+        let pbW = CVPixelBufferGetWidth(frame.pixelBuffer)
+        let pbH = CVPixelBufferGetHeight(frame.pixelBuffer)
+        if pbW > 0, pbH > 0 { previewImageAspect = CGFloat(pbW) / CGFloat(pbH) }
 
         let obs = tracker.process(pixelBuffer: frame.pixelBuffer,
                                   orientation: frame.orientation,
@@ -220,6 +248,91 @@ final class CameraViewModel {
         targetTrackId = trackId
     }
 
+    /// Tap behavior: lock a face, or tap the already-locked face again to return
+    /// to automatic (center-face) selection.
+    func toggleTargetLock(_ trackId: String) {
+        targetTrackId = (targetTrackId == trackId) ? nil : trackId
+    }
+
+    // MARK: - AR scan presentation (read/driven by the camera overlay)
+
+    /// The track the AR overlay treats as the active target right now: the
+    /// in-flight scan's track if still visible, otherwise the tap-locked or
+    /// center-most face.
+    var activeTargetTrackId: String? {
+        // While a scan/result is active, stay pinned to that track even if the face
+        // briefly drops out — never jump the active glow/anchor onto another person.
+        // (When the pinned face is absent, `activeTargetObservation` is nil and the
+        // panel falls back to a stable anchor instead of re-anchoring elsewhere.)
+        if let id = scanningTrackId { return id }
+        return chooseTargetObservation()?.trackId
+    }
+
+    /// The observation for `activeTargetTrackId`, if it is on screen.
+    var activeTargetObservation: FaceObservation? {
+        guard let id = activeTargetTrackId else { return nil }
+        return observations.first { $0.trackId == id }
+    }
+
+    /// True while the hologram panel should be visible (scanning or a result).
+    var isPanelVisible: Bool { scanStage != nil }
+
+    /// Start an identity scan on the current target. The Scan button and the
+    /// "find info on him" command both land here (the latter via the AppModel
+    /// capture handler), so they share one visual path.
+    func startIdentityScan() {
+        // Debounce: ignore taps while a scan is already resolving (the panel shows
+        // its progress); a fresh scan is allowed once a result has landed.
+        guard !(scanStage != nil && scanResult == nil) else { return }
+        Task { await appModel.runIdentityCommand("Find info on him") }
+    }
+
+    /// Re-run the scan (panel "Retry").
+    func retryScan() { startIdentityScan() }
+
+    /// Begin the visible scan sequence, anchored to `trackId`.
+    func beginARScan(trackId: String) {
+        scanGeneration &+= 1
+        scanningTrackId = trackId
+        scanResult = nil
+        scanStage = .locked
+        stageTask?.cancel()
+        stageTask = Task { @MainActor [weak self] in
+            await self?.advanceScanStages()
+        }
+    }
+
+    /// Gentle, alive progression through the pre-result stages. Holds at
+    /// `.verifying` until the backend lands; `finishARScan` flips to `.result`.
+    private func advanceScanStages() async {
+        let steps: [(stage: ARScanStage, ms: Int)] = [
+            (.readingBadge, 500), (.searching, 650), (.verifying, 700)
+        ]
+        for step in steps {
+            try? await Task.sleep(for: .milliseconds(step.ms))
+            if Task.isCancelled { return }
+            guard let current = scanStage, current != .result, scanResult == nil else { return }
+            if step.stage > current { scanStage = step.stage }
+        }
+    }
+
+    /// Land the backend result into the panel.
+    func finishARScan(result: IdentityResolveResultDTO?) {
+        stageTask?.cancel()
+        scanResult = result
+        scanStage = .result   // keep `scanningTrackId` so the panel stays anchored
+    }
+
+    /// Collapse and dismiss the hologram panel (swipe-down / close button).
+    func dismissARPanel() {
+        scanGeneration &+= 1   // supersede any in-flight resolve so it can't re-open the panel
+        stageTask?.cancel()
+        scanStage = nil
+        scanningTrackId = nil
+        scanResult = nil
+        appModel.clearIdentity()
+    }
+
     /// Pick the identity target: an explicitly selected track if it is still on
     /// screen, else the face nearest the screen center, tie-broken by largest
     /// area. `observations` use a normalized top-left (0...1) coordinate space.
@@ -268,6 +381,9 @@ final class CameraViewModel {
     /// identity, so the flow is always demoable.
     func resolveTargetIdentity(_ transcript: String) async {
         guard let target = chooseTargetObservation() else {
+            // Nothing to anchor to — clear any stale panel from a previous scan so
+            // it doesn't keep showing the old person while we report "no one here".
+            if isPanelVisible { dismissARPanel() }
             appModel.setIdentityPhase("No one in frame — point the camera at someone.")
             await appModel.resolveIdentity(
                 transcript: transcript, trackId: "no_target",
@@ -278,6 +394,8 @@ final class CameraViewModel {
         // Do NOT lock `targetTrackId` here: an auto-picked (center-face) target
         // must stay live so the next "find info on him" re-centers. Only an
         // explicit tap (selectTarget) should lock a track.
+        beginARScan(trackId: target.trackId)
+        let generation = scanGeneration
         statusLine = "Identifying…"
 
         var faceBase64 = ""
@@ -298,6 +416,10 @@ final class CameraViewModel {
             faceImageBase64: faceBase64,
             contextImageBase64: contextBase64
         )
+        // Only land the result if this scan is still current — the user may have
+        // dismissed it, or started another scan, while the backend was working.
+        guard generation == scanGeneration else { statusLine = nil; return }
+        finishARScan(result: appModel.identityResult)
         statusLine = nil
     }
 
@@ -321,6 +443,8 @@ final class CameraViewModel {
             matches[id] = nil
             policy.forget(trackId: id)
         }
+        // Drop a manual lock whose face has left the frame (back to auto-center).
+        if let t = targetTrackId, !currentTrackIds.contains(t) { targetTrackId = nil }
     }
 
     private func nowSeconds() -> TimeInterval { Date().timeIntervalSince1970 }

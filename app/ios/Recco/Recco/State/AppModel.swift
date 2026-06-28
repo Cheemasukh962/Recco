@@ -47,6 +47,10 @@ final class AppModel {
     private(set) var isResolvingIdentity = false
     /// Phase line shown in the ribbon during resolution.
     private(set) var identityStatusMessage: String?
+    /// Drives the optional full-detail identity sheet, opened from the hologram
+    /// panel's "Details" button. The in-camera AR panel is the primary result
+    /// surface, so the sheet is opt-in rather than auto-presented.
+    var showIdentityDetail = false
     /// Installed by `CameraViewModel.onAppear` so the command bar can trigger a
     /// capture from the live pixel buffer the camera owns. Cleared on disappear.
     @ObservationIgnored var identityCaptureHandler: ((String) async -> Void)?
@@ -398,6 +402,10 @@ final class AppModel {
     func clearIdentity() {
         identityResult = nil
         identityStatusMessage = nil
+        showIdentityDetail = false
+        // A dismissed scan should also stop the ribbon's "Finding info…" spinner,
+        // even if an in-flight resolve is still settling in the background.
+        isResolvingIdentity = false
     }
 
     // MARK: - Helpers
