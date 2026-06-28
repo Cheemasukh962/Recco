@@ -17,9 +17,14 @@ struct CameraView: View {
     @State private var vm: CameraViewModel
     /// Measured panel size, fed back so the panel can be clamped on-screen.
     @State private var panelSize = CGSize(width: HologramPanelView.width, height: 168)
+    /// Top edge of RootView's command dock in global (full-screen) coordinates.
+    /// Drives the reserved bottom band so AR content never hides behind the dock.
+    /// 0 means "not measured yet" → a safe fallback is used.
+    var dockTopGlobalY: CGFloat
 
-    init(appModel: AppModel) {
+    init(appModel: AppModel, dockTopGlobalY: CGFloat = 0) {
         _vm = State(initialValue: CameraViewModel(appModel: appModel))
+        self.dockTopGlobalY = dockTopGlobalY
     }
 
     var body: some View {
@@ -38,7 +43,6 @@ struct CameraView: View {
             if vm.authState == .denied || vm.authState == .restricted {
                 CameraPermissionView()
             }
-            cameraControls
         }
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 0.8) {
@@ -98,18 +102,37 @@ struct CameraView: View {
             if vm.isPanelVisible {
                 hologramLayer(in: size, bounds: bounds)
             }
+
+            // Camera flip — only on a real device (the simulated source can't
+            // flip). Positioned just above the dock so it never overlaps it.
+            if !vm.usingSimulatedSource {
+                GlassCircleButton(system: "arrow.triangle.2.circlepath.camera", label: "Flip") {
+                    vm.flipCamera()
+                }
+                .position(x: size.width - 43, y: bounds.maxY - 27)
+            }
         }
         .animation(.spring(response: 0.36, dampingFraction: 0.82), value: vm.isPanelVisible)
     }
 
-    /// The on-screen band overlays must stay within: inset from the top bar, and
-    /// from the bottom control strip plus this view's own Scan/Flip cluster.
+    /// Height of the bottom band reserved for the floating command dock, derived
+    /// from its measured top edge (`dockTopGlobalY`). Falls back to a safe value
+    /// before the first measurement arrives.
+    private func reservedBottom(in size: CGSize) -> CGFloat {
+        guard dockTopGlobalY > 1, dockTopGlobalY < size.height else {
+            // First-frame fallback only; the measured dock (a compact 3-control
+            // capsule) is smaller, so reserve modestly until it reports in.
+            return max(132, windowSafeAreaInsets().bottom + 96)
+        }
+        return max(120, size.height - dockTopGlobalY)
+    }
+
+    /// The on-screen band AR overlays must stay within: inset from the top bar,
+    /// and clear of the measured command dock at the bottom.
     private func visibleBounds(in size: CGSize) -> CGRect {
         let insets = windowSafeAreaInsets()
         let topInset = insets.top + 54
-        // Clear RootView's bottom control strip AND this view's Flip/Scan cluster,
-        // which reaches ~264pt above the true bottom edge.
-        let bottomInset = max(insets.bottom + 184, 268)
+        let bottomInset = reservedBottom(in: size) + 12
         return CGRect(
             x: 12, y: topInset,
             width: size.width - 24,
@@ -211,23 +234,6 @@ struct CameraView: View {
         }
     }
 
-    // MARK: - Controls
-
-    private var cameraControls: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            if !vm.usingSimulatedSource {
-                GlassCircleButton(system: "arrow.triangle.2.circlepath.camera", label: "Flip") {
-                    vm.flipCamera()
-                }
-            }
-            ScanButton(active: vm.isPanelVisible) { vm.startIdentityScan() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 16)
-        .padding(.bottom, 132)   // sit above the control strip Person D draws
-    }
-
     // MARK: - Helpers
 
     private func clampedX(_ x: CGFloat, in size: CGSize) -> CGFloat {
@@ -287,27 +293,6 @@ private struct AnchorDot: View {
 }
 
 // MARK: - Buttons
-
-/// Primary scan action: cyan, prominent, one-handed reachable.
-private struct ScanButton: View {
-    var active: Bool
-    var action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: active ? "rays" : "viewfinder")
-                    .font(.title2.weight(.semibold))
-                Text("Scan").font(.caption2.weight(.bold))
-            }
-            .foregroundStyle(.black)
-            .frame(width: 64, height: 64)
-            .background(ARTheme.scan, in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
-            .shadow(color: ARTheme.scan.opacity(0.5), radius: 10, y: 3)
-        }
-        .accessibilityLabel("Scan the target for identity")
-    }
-}
 
 /// Secondary glass circular button (camera flip).
 private struct GlassCircleButton: View {
