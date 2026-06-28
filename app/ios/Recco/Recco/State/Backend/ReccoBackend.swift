@@ -31,24 +31,47 @@ protocol ReccoBackend: Sendable {
         contextImageBase64: String
     ) async throws -> IdentityResolveResultDTO
 
+    // MARK: - Mission ("Today's Goal")
+
+    /// Parse a free-text event goal into a structured mission
+    /// (`POST /api/mission/parse`). Stored per `clientId` server-side.
+    func parseMission(clientId: String, rawText: String) async throws -> MissionProfileDTO
+
+    /// The stored mission for a client, if any (`POST /api/mission/current`).
+    func currentMission(clientId: String) async throws -> MissionProfileDTO?
+
     // MARK: - Brain scan memory ("event memory")
 
-    /// All saved scan memories, newest first (`GET /api/brain/memories`).
-    func listScanMemories() async throws -> [ScanMemoryDTO]
+    /// All saved scan memories for a client, newest first
+    /// (`GET /api/brain/memories?clientId=…`).
+    func listScanMemories(clientId: String?) async throws -> [ScanMemoryDTO]
 
-    /// Create/update a memory from an identity result, deduped server-side
-    /// (`POST /api/brain/memories/upsert`). Returns the saved memory.
+    /// Create/update a memory from an identity result, deduped per-client. Scores
+    /// it against the mission when one is included (`POST /api/brain/memories/upsert`).
     func upsertScanMemory(_ input: ScanMemoryInputDTO) async throws -> ScanMemoryDTO
+
+    /// Re-score an existing memory against a mission (`POST /api/brain/memories/score`).
+    func scoreScanMemory(id: String, clientId: String?, mission: MissionProfileDTO) async throws -> ScanMemoryDTO?
 
     /// Save notes onto a memory (`POST /api/brain/memories/notes`).
     func updateScanMemoryNotes(id: String, notes: String?) async throws -> ScanMemoryDTO?
 
-    /// Generate (and persist) outreach variants for a memory
+    /// Update the follow-up status (and optional edited outreach / sentAt) on a
+    /// memory (`POST /api/brain/memories/follow-up-status`). Drives "Sent".
+    func updateFollowUpStatus(
+        id: String,
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> ScanMemoryDTO?
+
+    /// Generate (and persist) mission-aware outreach variants for a memory
     /// (`POST /api/brain/memories/outreach`).
     func generateScanMemoryOutreach(
         id: String,
         eventName: String?,
-        senderName: String?
+        senderName: String?,
+        mission: MissionProfileDTO?
     ) async throws -> OutreachDraftDTO
 }
 

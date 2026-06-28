@@ -31,11 +31,11 @@ enum ScanConfidence: String, Codable, Hashable {
 /// A generated outreach draft: three ready-to-send variants. Mirrors the backend
 /// `OutreachDraft`.
 struct OutreachDraftDTO: Codable, Equatable, Hashable {
-    let linkedinDm: String
-    let coldEmailSubject: String
-    let coldEmail: String
-    let inPersonOpener: String
-    let generatedAt: Double
+    var linkedinDm: String
+    var coldEmailSubject: String
+    var coldEmail: String
+    var inPersonOpener: String
+    var generatedAt: Double
 
     init(
         linkedinDm: String,
@@ -52,9 +52,10 @@ struct OutreachDraftDTO: Codable, Equatable, Hashable {
     }
 }
 
-/// A durable Brain "event memory" — one resolved person. Mirrors the backend
-/// public `ScanMemory`. Decoding is deliberately lenient: every uncertain field
-/// is optional with a safe default so a partial backend payload never crashes.
+/// A durable Brain "event memory" — one resolved person, scored against the
+/// user's mission. Mirrors the backend public `ScanMemory`. Decoding is
+/// deliberately lenient: every uncertain field is optional with a safe default
+/// so a partial (or older) backend payload never crashes.
 struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
     let id: String
     let scanId: String
@@ -76,10 +77,23 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
     let lastScannedAt: Double
     let scanCount: Int
 
+    // Mission-driven lead scoring + follow-up.
+    let clientId: String?
+    var leadPriority: LeadPriority?
+    var leadScore: Double?
+    var leadReasons: [String]
+    var nextAction: String?
+    var followUpStatus: FollowUpStatus
+    var sentAt: Double?
+    var editedOutreach: OutreachDraftDTO?
+    var missionSnapshot: MissionProfileDTO?
+
     enum CodingKeys: String, CodingKey {
         case id, scanId, personId, name, headline, role, company, school
         case linkedinUrl, email, confidence, confidenceScore, sources, notes
         case badgeText, outreach, firstScannedAt, lastScannedAt, scanCount
+        case clientId, leadPriority, leadScore, leadReasons, nextAction
+        case followUpStatus, sentAt, editedOutreach, missionSnapshot
     }
 
     init(
@@ -101,7 +115,16 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         outreach: OutreachDraftDTO? = nil,
         firstScannedAt: Double = 0,
         lastScannedAt: Double = 0,
-        scanCount: Int = 1
+        scanCount: Int = 1,
+        clientId: String? = nil,
+        leadPriority: LeadPriority? = nil,
+        leadScore: Double? = nil,
+        leadReasons: [String] = [],
+        nextAction: String? = nil,
+        followUpStatus: FollowUpStatus = .new,
+        sentAt: Double? = nil,
+        editedOutreach: OutreachDraftDTO? = nil,
+        missionSnapshot: MissionProfileDTO? = nil
     ) {
         self.id = id
         self.scanId = scanId
@@ -122,6 +145,15 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         self.firstScannedAt = firstScannedAt
         self.lastScannedAt = lastScannedAt
         self.scanCount = scanCount
+        self.clientId = clientId
+        self.leadPriority = leadPriority
+        self.leadScore = leadScore
+        self.leadReasons = leadReasons
+        self.nextAction = nextAction
+        self.followUpStatus = followUpStatus
+        self.sentAt = sentAt
+        self.editedOutreach = editedOutreach
+        self.missionSnapshot = missionSnapshot
     }
 
     init(from decoder: Decoder) throws {
@@ -146,6 +178,15 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         firstScannedAt = (try? c.decode(Double.self, forKey: .firstScannedAt)) ?? 0
         lastScannedAt = (try? c.decode(Double.self, forKey: .lastScannedAt)) ?? 0
         scanCount = (try? c.decode(Int.self, forKey: .scanCount)) ?? 1
+        clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
+        leadPriority = try c.decodeIfPresent(LeadPriority.self, forKey: .leadPriority)
+        leadScore = try c.decodeIfPresent(Double.self, forKey: .leadScore)
+        leadReasons = (try? c.decode([String].self, forKey: .leadReasons)) ?? []
+        nextAction = try c.decodeIfPresent(String.self, forKey: .nextAction)
+        followUpStatus = (try? c.decode(FollowUpStatus.self, forKey: .followUpStatus)) ?? .new
+        sentAt = try c.decodeIfPresent(Double.self, forKey: .sentAt)
+        editedOutreach = try c.decodeIfPresent(OutreachDraftDTO.self, forKey: .editedOutreach)
+        missionSnapshot = try c.decodeIfPresent(MissionProfileDTO.self, forKey: .missionSnapshot)
     }
 
     private func clean(_ s: String?) -> String? {
@@ -179,18 +220,47 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
         Date(timeIntervalSince1970: lastScannedAt / 1000)
     }
 
-    /// Matches a free-text query against name/company/role/headline/linkedin.
+    // MARK: - Lead helpers
+
+    var priorityLabel: String { leadPriority?.label ?? "Unscored" }
+
+    /// The outreach to show/send: the user's edits win over the generated draft.
+    var effectiveOutreach: OutreachDraftDTO? { editedOutreach ?? outreach }
+
+    var isSent: Bool { followUpStatus == .sent }
+
+    var hasOutreach: Bool { effectiveOutreach != nil }
+
+    /// Matches a free-text query against identity *and* lead signal: name,
+    /// company, role, headline, linkedin, school, priority label, reasons, and
+    /// the mission keywords it was scored under.
     func matches(_ query: String) -> Bool {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return true }
-        let haystack = [name, company, role, headline, linkedinUrl, school]
+        var parts = [name, company, role, headline, linkedinUrl, school, leadPriority?.label]
             .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
-        return haystack.contains(q)
+        parts.append(contentsOf: leadReasons.map { $0.lowercased() })
+        if let mission = missionSnapshot {
+            parts.append(mission.rawText.lowercased())
+            parts.append(mission.goalType.label.lowercased())
+        }
+        return parts.joined(separator: " ").contains(q)
     }
 
-    /// Copy helper for local/backend updates while keeping the DTO immutable.
-    private func copy(notes: String?, outreach: OutreachDraftDTO?) -> ScanMemoryDTO {
+    // MARK: - Immutable copy helpers
+
+    private func copy(
+        notes: String?? = nil,
+        outreach: OutreachDraftDTO?? = nil,
+        leadPriority: LeadPriority?? = nil,
+        leadScore: Double?? = nil,
+        leadReasons: [String]? = nil,
+        nextAction: String?? = nil,
+        followUpStatus: FollowUpStatus? = nil,
+        sentAt: Double?? = nil,
+        editedOutreach: OutreachDraftDTO?? = nil,
+        missionSnapshot: MissionProfileDTO?? = nil
+    ) -> ScanMemoryDTO {
         ScanMemoryDTO(
             id: id,
             scanId: scanId,
@@ -205,29 +275,69 @@ struct ScanMemoryDTO: Identifiable, Codable, Equatable, Hashable {
             confidence: confidence,
             confidenceScore: confidenceScore,
             sources: sources,
-            notes: notes,
+            notes: notes ?? self.notes,
             badgeText: badgeText,
-            outreach: outreach,
+            outreach: outreach ?? self.outreach,
             firstScannedAt: firstScannedAt,
             lastScannedAt: lastScannedAt,
-            scanCount: scanCount
+            scanCount: scanCount,
+            clientId: clientId,
+            leadPriority: leadPriority ?? self.leadPriority,
+            leadScore: leadScore ?? self.leadScore,
+            leadReasons: leadReasons ?? self.leadReasons,
+            nextAction: nextAction ?? self.nextAction,
+            followUpStatus: followUpStatus ?? self.followUpStatus,
+            sentAt: sentAt ?? self.sentAt,
+            editedOutreach: editedOutreach ?? self.editedOutreach,
+            missionSnapshot: missionSnapshot ?? self.missionSnapshot
         )
     }
 
     func replacingNotes(_ notes: String?) -> ScanMemoryDTO {
-        copy(notes: notes, outreach: outreach)
+        copy(notes: .some(notes))
     }
 
     func replacingOutreach(_ outreach: OutreachDraftDTO?) -> ScanMemoryDTO {
-        copy(notes: notes, outreach: outreach)
+        copy(outreach: .some(outreach))
+    }
+
+    func replacingFollowUp(
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) -> ScanMemoryDTO {
+        copy(
+            followUpStatus: status,
+            sentAt: .some(sentAt),
+            editedOutreach: .some(editedOutreach)
+        )
+    }
+
+    func replacingLead(
+        priority: LeadPriority?,
+        score: Double?,
+        reasons: [String],
+        nextAction: String?,
+        missionSnapshot: MissionProfileDTO?
+    ) -> ScanMemoryDTO {
+        copy(
+            leadPriority: .some(priority),
+            leadScore: .some(score),
+            leadReasons: reasons,
+            nextAction: .some(nextAction),
+            missionSnapshot: .some(missionSnapshot)
+        )
     }
 }
 
 /// Input the app posts to upsert a memory after an identity resolve. Encodable;
-/// carries only extracted text/links/scores — never images.
+/// carries only extracted text/links/scores — never images. Now also carries the
+/// `clientId` (Brain isolation) and the current `mission` (triggers scoring).
 struct ScanMemoryInputDTO: Encodable {
     let scanId: String
     let status: String
+    let clientId: String?
+    let mission: MissionProfileDTO?
     let name: String?
     let headline: String?
     let role: String?

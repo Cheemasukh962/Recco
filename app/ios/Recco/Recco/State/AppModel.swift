@@ -103,6 +103,10 @@ final class AppModel {
     init(demoMode: DemoMode = .default, apiBaseURL: URL? = nil) {
         self.demoMode = demoMode
         self.apiBaseURL = apiBaseURL
+        // Anonymous per-install id (no auth) so each device's Brain stays its own.
+        self.clientId = AppModel.loadOrCreateClientId()
+        // Restore the saved mission ("Today's Goal") from a previous launch.
+        self.missionProfile = AppModel.loadStoredMission()
         // Seed with bundled roster immediately so the UI is never empty, even
         // before `bootstrap()` runs.
         let seed = RosterStore.loadBundledPeople()
@@ -539,6 +543,93 @@ final class AppModel {
         stopListening(run: false)
     }
 
+    // MARK: - Mission ("Today's Goal")
+
+    /// Anonymous per-install id. Scopes Brain memories + mission server-side.
+    let clientId: String
+    /// The current mission, persisted across launches. nil until set up.
+    private(set) var missionProfile: MissionProfileDTO?
+    /// True while a mission is being parsed (drives the setup loading state).
+    private(set) var isParsingMission = false
+
+    /// First launch shows mission setup until a mission exists.
+    var hasCompletedMissionSetup: Bool { missionProfile != nil }
+
+    private static let clientIdKey = "recco.clientId"
+    private static let missionKey = "recco.mission.v1"
+
+    static func loadOrCreateClientId() -> String {
+        let d = UserDefaults.standard
+        if let id = d.string(forKey: clientIdKey), !id.isEmpty { return id }
+        let id = "client_" + UUID().uuidString.lowercased()
+        d.set(id, forKey: clientIdKey)
+        return id
+    }
+
+    static func loadStoredMission() -> MissionProfileDTO? {
+        guard let data = UserDefaults.standard.data(forKey: missionKey) else { return nil }
+        return try? JSONDecoder().decode(MissionProfileDTO.self, from: data)
+    }
+
+    private func persistMission(_ mission: MissionProfileDTO?) {
+        if let mission, let data = try? JSONEncoder().encode(mission) {
+            UserDefaults.standard.set(data, forKey: Self.missionKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.missionKey)
+        }
+    }
+
+    /// Parse free text into a structured mission (backend, with on-device
+    /// fallback), persist it, and re-score the Brain.
+    func parseMission(rawText: String) async {
+        isParsingMission = true
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let parsed = try await backend.parseMission(clientId: clientId, rawText: text)
+            setMission(parsed)
+        } catch {
+            setMission(MissionParser.parse(text))
+        }
+        isParsingMission = false
+    }
+
+    /// Skip setup → a sensible default mission so scoring still works.
+    func skipMissionSetup() {
+        setMission(MissionParser.parse("General networking"))
+    }
+
+    /// Replace the mission directly (edit flow).
+    func updateMission(_ mission: MissionProfileDTO) { setMission(mission) }
+
+    /// Debug helper: clear the mission so setup shows again next launch.
+    func clearMissionForTesting() {
+        missionProfile = nil
+        persistMission(nil)
+    }
+
+    private func setMission(_ mission: MissionProfileDTO) {
+        var m = mission
+        if m.clientId == nil { m.clientId = clientId }
+        missionProfile = m
+        persistMission(m)
+        // Re-score every memory against the new mission so the graph updates.
+        scanMemories = scanMemories.map(scoreForDisplay)
+    }
+
+    /// Score a memory against the active mission for display, preserving any
+    /// follow-up state (status/sentAt/edited outreach). No mission → unchanged.
+    private func scoreForDisplay(_ memory: ScanMemoryDTO) -> ScanMemoryDTO {
+        guard let mission = missionProfile else { return memory }
+        let r = LeadScorer.score(memory, mission: mission)
+        return memory.replacingLead(
+            priority: r.priority,
+            score: r.score,
+            reasons: r.reasons,
+            nextAction: r.nextAction.rawValue,
+            missionSnapshot: MissionProfileDTO(rawText: mission.rawText, goalType: mission.goalType)
+        )
+    }
+
     // MARK: - Brain (event memory)
 
     /// All saved scan memories, newest first.
@@ -570,12 +661,13 @@ final class AppModel {
         scanMemories.first { $0.id == id }
     }
 
-    /// Load the saved scan memories from the active backend.
+    /// Load the saved scan memories for this client, scored against the mission.
     func loadScanMemories() async {
         isLoadingBrain = true
         brainError = nil
         do {
-            scanMemories = try await backend.listScanMemories()
+            let loaded = try await backend.listScanMemories(clientId: clientId)
+            scanMemories = loaded.map(scoreForDisplay)
         } catch {
             brainError = error.localizedDescription
         }
@@ -602,6 +694,8 @@ final class AppModel {
         let input = ScanMemoryInputDTO(
             scanId: result.trackId,
             status: result.status.rawValue,
+            clientId: clientId,
+            mission: missionProfile,
             name: name,
             headline: best?.headline,
             role: best?.role ?? clue?.role,
@@ -618,7 +712,12 @@ final class AppModel {
         )
         do {
             let saved = try await backend.upsertScanMemory(input)
+            let scored = scoreForDisplay(saved)
             mergeMemoryIntoList(saved)
+            // A subtle nudge when a strong lead lands — never blocks the camera.
+            if scored.leadPriority == .hot {
+                statusMessage = "🔥 Hot lead saved to Brain"
+            }
         } catch {
             // Best-effort: Brain save never interrupts the scan flow.
         }
@@ -643,7 +742,8 @@ final class AppModel {
             let draft = try await backend.generateScanMemoryOutreach(
                 id: memoryId,
                 eventName: AppModel.eventName,
-                senderName: AppModel.senderName
+                senderName: AppModel.senderName,
+                mission: missionProfile
             )
             if let i = scanMemories.firstIndex(where: { $0.id == memoryId }) {
                 scanMemories[i] = scanMemories[i].replacingOutreach(draft)
@@ -654,12 +754,41 @@ final class AppModel {
         isGeneratingOutreach = false
     }
 
-    /// Replace an existing memory in place, or insert it at the front.
+    /// Replace an existing memory in place, or insert it at the front. Scores it
+    /// against the active mission so the graph reflects priority immediately.
     private func mergeMemoryIntoList(_ memory: ScanMemoryDTO) {
-        if let i = scanMemories.firstIndex(where: { $0.id == memory.id }) {
-            scanMemories[i] = memory
+        let scored = scoreForDisplay(memory)
+        if let i = scanMemories.firstIndex(where: { $0.id == scored.id }) {
+            scanMemories[i] = scored
         } else {
-            scanMemories.insert(memory, at: 0)
+            scanMemories.insert(scored, at: 0)
+        }
+    }
+
+    /// Fake "Send" (and any follow-up status change). Updates locally for a snappy
+    /// UI, then persists. We never actually send email/LinkedIn — status only.
+    func updateFollowUpStatus(
+        id: String,
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO? = nil
+    ) async {
+        let sentAt: Double? = status == .sent ? now() : memory(id: id)?.sentAt
+        // Optimistic local update.
+        if let i = scanMemories.firstIndex(where: { $0.id == id }) {
+            scanMemories[i] = scanMemories[i].replacingFollowUp(
+                status: status,
+                editedOutreach: editedOutreach ?? scanMemories[i].editedOutreach,
+                sentAt: sentAt
+            )
+        }
+        do {
+            if let updated = try await backend.updateFollowUpStatus(
+                id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt
+            ) {
+                mergeMemoryIntoList(updated)
+            }
+        } catch {
+            brainError = "Couldn't update follow-up: \(error.localizedDescription)"
         }
     }
 

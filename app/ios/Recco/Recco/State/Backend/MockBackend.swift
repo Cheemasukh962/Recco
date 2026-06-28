@@ -119,9 +119,23 @@ final class MockBackend: ReccoBackend {
         )
     }
 
+    // MARK: - Mission (offline)
+
+    func parseMission(clientId: String, rawText: String) async throws -> MissionProfileDTO {
+        try? await Task.sleep(for: .milliseconds(350))
+        var mission = MissionParser.parse(rawText)
+        mission.clientId = clientId
+        memoryStore.setMission(mission)
+        return mission
+    }
+
+    func currentMission(clientId: String) async throws -> MissionProfileDTO? {
+        memoryStore.currentMission()
+    }
+
     // MARK: - Brain scan memory (offline)
 
-    func listScanMemories() async throws -> [ScanMemoryDTO] {
+    func listScanMemories(clientId: String?) async throws -> [ScanMemoryDTO] {
         memoryStore.list()
     }
 
@@ -130,17 +144,32 @@ final class MockBackend: ReccoBackend {
         return memoryStore.upsert(input)
     }
 
+    func scoreScanMemory(id: String, clientId: String?, mission: MissionProfileDTO) async throws -> ScanMemoryDTO? {
+        memoryStore.score(id: id, mission: mission)
+    }
+
     func updateScanMemoryNotes(id: String, notes: String?) async throws -> ScanMemoryDTO? {
         memoryStore.updateNotes(id: id, notes: notes)
+    }
+
+    func updateFollowUpStatus(
+        id: String,
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> ScanMemoryDTO? {
+        try? await Task.sleep(for: .milliseconds(120))
+        return memoryStore.updateFollowUp(id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt)
     }
 
     func generateScanMemoryOutreach(
         id: String,
         eventName: String?,
-        senderName: String?
+        senderName: String?,
+        mission: MissionProfileDTO?
     ) async throws -> OutreachDraftDTO {
         try? await Task.sleep(for: latency)
-        return memoryStore.generateOutreach(id: id, eventName: eventName, senderName: senderName)
+        return memoryStore.generateOutreach(id: id, eventName: eventName, senderName: senderName, mission: mission)
     }
 }
 
@@ -151,6 +180,7 @@ final class MockBackend: ReccoBackend {
 private final class MockMemoryStore: @unchecked Sendable {
     private let lock = NSLock()
     private var memories: [ScanMemoryDTO]
+    private var mission: MissionProfileDTO?
 
     init(seedPeople people: [PersonDTO]) {
         if ProcessInfo.processInfo.environment["RECCO_BRAIN_EMPTY"] == "1" {
@@ -165,6 +195,45 @@ private final class MockMemoryStore: @unchecked Sendable {
         return memories.sorted { $0.lastScannedAt > $1.lastScannedAt }
     }
 
+    func setMission(_ mission: MissionProfileDTO) {
+        lock.lock(); defer { lock.unlock() }
+        self.mission = mission
+    }
+
+    func currentMission() -> MissionProfileDTO? {
+        lock.lock(); defer { lock.unlock() }
+        return mission
+    }
+
+    func score(id: String, mission: MissionProfileDTO) -> ScanMemoryDTO? {
+        lock.lock(); defer { lock.unlock() }
+        guard let i = memories.firstIndex(where: { $0.id == id }) else { return nil }
+        let r = LeadScorer.score(memories[i], mission: mission)
+        memories[i] = memories[i].replacingLead(
+            priority: r.priority, score: r.score, reasons: r.reasons,
+            nextAction: r.nextAction.rawValue,
+            missionSnapshot: MissionProfileDTO(rawText: mission.rawText, goalType: mission.goalType)
+        )
+        return memories[i]
+    }
+
+    func updateFollowUp(
+        id: String,
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) -> ScanMemoryDTO? {
+        lock.lock(); defer { lock.unlock() }
+        guard let i = memories.firstIndex(where: { $0.id == id }) else { return nil }
+        let resolvedSentAt = status == .sent ? (sentAt ?? Date().timeIntervalSince1970 * 1000) : (sentAt ?? memories[i].sentAt)
+        memories[i] = memories[i].replacingFollowUp(
+            status: status,
+            editedOutreach: editedOutreach ?? memories[i].editedOutreach,
+            sentAt: resolvedSentAt
+        )
+        return memories[i]
+    }
+
     func updateNotes(id: String, notes: String?) -> ScanMemoryDTO? {
         lock.lock(); defer { lock.unlock() }
         guard let i = memories.firstIndex(where: { $0.id == id }) else { return nil }
@@ -173,14 +242,15 @@ private final class MockMemoryStore: @unchecked Sendable {
         return memories[i]
     }
 
-    func generateOutreach(id: String, eventName: String?, senderName: String?) -> OutreachDraftDTO {
+    func generateOutreach(id: String, eventName: String?, senderName: String?, mission: MissionProfileDTO?) -> OutreachDraftDTO {
         lock.lock(); defer { lock.unlock() }
+        let goal = mission?.goalType ?? self.mission?.goalType
         let draft: OutreachDraftDTO
         if let i = memories.firstIndex(where: { $0.id == id }) {
-            draft = MockMemoryStore.outreach(for: memories[i], eventName: eventName, senderName: senderName)
+            draft = MockMemoryStore.outreach(for: memories[i], eventName: eventName, senderName: senderName, goal: goal)
             memories[i] = memories[i].replacingOutreach(draft)
         } else {
-            draft = MockMemoryStore.outreach(for: nil, eventName: eventName, senderName: senderName)
+            draft = MockMemoryStore.outreach(for: nil, eventName: eventName, senderName: senderName, goal: goal)
         }
         return draft
     }
@@ -284,35 +354,83 @@ private final class MockMemoryStore: @unchecked Sendable {
         return c.isEmpty ? n : "\(n)|\(c)"
     }
 
+    /// A subtle, goal-aware extra clause (empty for networking/other).
+    private static func missionAngle(_ goal: MissionGoalType?) -> String {
+        switch goal {
+        case .fundraising: return "I'd genuinely value your perspective as an investor as we shape our next round."
+        case .getHired: return "I'm exploring my next role, and your team came to mind."
+        case .hiring: return "We're growing the team and I'd love to keep you in the loop."
+        case .customers: return "Curious whether what we're building could be useful for your team."
+        case .sponsors: return "Wondering if there might be a fit for a partnership down the line."
+        case .cofounder: return "Always keen to meet people I might end up building with."
+        case .founders: return "Always up for trading notes with other founders."
+        default: return ""
+        }
+    }
+
     private static func outreach(
         for memory: ScanMemoryDTO?,
         eventName: String?,
-        senderName: String?
+        senderName: String?,
+        goal: MissionGoalType?
     ) -> OutreachDraftDTO {
         let fn = memory?.firstName ?? "there"
         let topic = memory?.company ?? memory?.role ?? "what you're building"
         let event = (eventName?.isEmpty == false ? eventName! : "the event")
         let sender = senderName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let signoff = sender.isEmpty ? "Best" : "Best,\n\(sender)"
+        let angle = missionAngle(goal)
+        let dmAngle = angle.isEmpty ? "" : " \(angle)"
+        let emailAngle = angle.isEmpty ? "" : "\(angle)\n\n"
         return OutreachDraftDTO(
-            linkedinDm: "Hey \(fn), great meeting you at \(event). Loved hearing about \(topic). "
+            linkedinDm: "Hey \(fn), great meeting you at \(event). Loved hearing about \(topic).\(dmAngle) "
                 + "We're building Recco, an AR memory layer for event networking — would love to compare notes.",
             coldEmailSubject: "Great meeting you at \(event)",
             coldEmail: "Hey \(fn),\n\nGreat meeting you at \(event). I noticed you're working around \(topic), "
                 + "and it connected with what we're building in Recco: a lightweight AR memory layer for event networking.\n\n"
-                + "Would love to compare notes sometime this week.\n\n\(signoff)",
+                + "\(emailAngle)Would love to compare notes sometime this week.\n\n\(signoff)",
             inPersonOpener: "Hey \(fn) — good to see you again. I was just telling someone about your work on \(topic). "
                 + "How's \(event) treating you?"
         )
     }
 
+    /// Seed a handful of memories crafted so the priority graph reads well even
+    /// offline: a hot lead (flagged high-priority), a warm one, a cold one, a
+    /// needs-info one, and one already marked Sent. Scoring is applied by the app
+    /// against the active mission; the *content* here guarantees a spread.
     private static func seed(from people: [PersonDTO]) -> [ScanMemoryDTO] {
         let now = Date().timeIntervalSince1970 * 1000
-        let confidences: [ScanConfidence] = [.verified, .possible, .needsConfirmation]
-        let sourceSets = [["badge", "fiber", "face"], ["badge", "fiber", "voice"], ["badge"]]
-        return people.prefix(3).enumerated().map { idx, p in
-            let linkedin = p.links.linkedin
-                ?? "https://www.linkedin.com/in/\(p.name.lowercased().replacingOccurrences(of: " ", with: "-"))"
+        let confidences: [ScanConfidence] = [.verified, .verified, .possible, .needsConfirmation, .verified]
+        let hasLinkedIn = [true, true, true, false, true]
+        let hasEmail = [true, true, false, false, true]
+        let scanCounts = [3, 2, 1, 1, 1]
+        let notesArr: [String?] = [
+            "High priority — great fit, follow up this week.",
+            nil, nil, nil,
+            "Met at the booth; already reached out.",
+        ]
+        let statuses: [FollowUpStatus] = [.new, .new, .new, .new, .sent]
+        let scores = [0.92, 0.81, 0.66, 0.34, 0.88]
+        let sourceSets = [
+            ["badge", "fiber", "face"],
+            ["badge", "fiber", "voice"],
+            ["badge", "fiber"],
+            ["badge"],
+            ["badge", "fiber", "face", "voice"],
+        ]
+
+        return people.prefix(5).enumerated().map { idx, p in
+            let slug = p.name.lowercased().replacingOccurrences(of: " ", with: "-")
+            let linkedin = hasLinkedIn[idx]
+                ? (p.links.linkedin ?? "https://www.linkedin.com/in/\(slug)")
+                : nil
+            let email = hasEmail[idx]
+                ? "\(p.firstName.lowercased())@\(p.company.lowercased().replacingOccurrences(of: " ", with: "")).com"
+                : nil
+            let status = statuses[idx]
+            let outreach = status == .sent
+                ? MockMemoryStore.outreach(for: nil, eventName: nil, senderName: "Pranav", goal: nil)
+                : nil
             return ScanMemoryDTO(
                 id: "mem_seed_\(p.id)",
                 scanId: "trk_seed_\(idx)",
@@ -322,17 +440,19 @@ private final class MockMemoryStore: @unchecked Sendable {
                 role: p.role,
                 company: p.company,
                 school: nil,
-                linkedinUrl: confidences[idx] == .needsConfirmation ? nil : linkedin,
-                email: idx == 0 ? "\(p.firstName.lowercased())@\(p.company.lowercased().replacingOccurrences(of: " ", with: "")).com" : nil,
+                linkedinUrl: linkedin,
+                email: email,
                 confidence: confidences[idx],
-                confidenceScore: [0.91, 0.74, 0.38][idx],
+                confidenceScore: scores[idx],
                 sources: sourceSets[idx],
-                notes: nil,
+                notes: notesArr[idx],
                 badgeText: "\(p.name) · \(p.company)",
-                outreach: nil,
-                firstScannedAt: now - Double((idx + 1) * 1000 * 60 * 7),
-                lastScannedAt: now - Double(idx * 1000 * 60 * 3),
-                scanCount: [3, 1, 1][idx]
+                outreach: outreach,
+                firstScannedAt: now - Double((idx + 1) * 1000 * 60 * 9),
+                lastScannedAt: now - Double(idx * 1000 * 60 * 4),
+                scanCount: scanCounts[idx],
+                followUpStatus: status,
+                sentAt: status == .sent ? now - Double(1000 * 60 * 30) : nil
             )
         }
     }

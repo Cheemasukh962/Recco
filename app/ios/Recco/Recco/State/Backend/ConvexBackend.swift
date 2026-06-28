@@ -106,16 +106,42 @@ final class ConvexBackend: ReccoBackend {
         )
     }
 
+    // MARK: - Mission
+
+    func parseMission(clientId: String, rawText: String) async throws -> MissionProfileDTO {
+        guard hasBackend else { return try await fallback.parseMission(clientId: clientId, rawText: rawText) }
+        let body = MissionParseRequest(clientId: clientId, rawText: rawText)
+        return try await post("/api/mission/parse", body: body, as: MissionProfileDTO.self)
+    }
+
+    func currentMission(clientId: String) async throws -> MissionProfileDTO? {
+        guard hasBackend else { return try await fallback.currentMission(clientId: clientId) }
+        let body = MissionCurrentRequest(clientId: clientId)
+        return try await post("/api/mission/current", body: body, as: NullableMission.self).value
+    }
+
     // MARK: - Brain scan memory
 
-    func listScanMemories() async throws -> [ScanMemoryDTO] {
-        guard hasBackend else { return try await fallback.listScanMemories() }
-        return try await get("/api/brain/memories", as: [ScanMemoryDTO].self)
+    func listScanMemories(clientId: String?) async throws -> [ScanMemoryDTO] {
+        guard hasBackend else { return try await fallback.listScanMemories(clientId: clientId) }
+        var path = "/api/brain/memories"
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        if let clientId,
+           let encoded = clientId.addingPercentEncoding(withAllowedCharacters: allowed) {
+            path += "?clientId=\(encoded)"
+        }
+        return try await get(path, as: [ScanMemoryDTO].self)
     }
 
     func upsertScanMemory(_ input: ScanMemoryInputDTO) async throws -> ScanMemoryDTO {
         guard hasBackend else { return try await fallback.upsertScanMemory(input) }
         return try await post("/api/brain/memories/upsert", body: input, as: ScanMemoryDTO.self)
+    }
+
+    func scoreScanMemory(id: String, clientId: String?, mission: MissionProfileDTO) async throws -> ScanMemoryDTO? {
+        guard hasBackend else { return try await fallback.scoreScanMemory(id: id, clientId: clientId, mission: mission) }
+        let body = ScoreRequest(id: id, clientId: clientId, mission: mission)
+        return try await post("/api/brain/memories/score", body: body, as: NullableScanMemory.self).value
     }
 
     func updateScanMemoryNotes(id: String, notes: String?) async throws -> ScanMemoryDTO? {
@@ -124,15 +150,29 @@ final class ConvexBackend: ReccoBackend {
         return try await post("/api/brain/memories/notes", body: body, as: NullableScanMemory.self).value
     }
 
+    func updateFollowUpStatus(
+        id: String,
+        status: FollowUpStatus,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> ScanMemoryDTO? {
+        guard hasBackend else {
+            return try await fallback.updateFollowUpStatus(id: id, status: status, editedOutreach: editedOutreach, sentAt: sentAt)
+        }
+        let body = FollowUpStatusRequest(id: id, status: status.rawValue, editedOutreach: editedOutreach, sentAt: sentAt)
+        return try await post("/api/brain/memories/follow-up-status", body: body, as: NullableScanMemory.self).value
+    }
+
     func generateScanMemoryOutreach(
         id: String,
         eventName: String?,
-        senderName: String?
+        senderName: String?,
+        mission: MissionProfileDTO?
     ) async throws -> OutreachDraftDTO {
         guard hasBackend else {
-            return try await fallback.generateScanMemoryOutreach(id: id, eventName: eventName, senderName: senderName)
+            return try await fallback.generateScanMemoryOutreach(id: id, eventName: eventName, senderName: senderName, mission: mission)
         }
-        let body = OutreachRequest(id: id, eventName: eventName, senderName: senderName)
+        let body = OutreachRequest(id: id, eventName: eventName, senderName: senderName, mission: mission)
         return try await post(
             "/api/brain/memories/outreach",
             body: body,
@@ -261,6 +301,29 @@ final class ConvexBackend: ReccoBackend {
         let id: String
         let eventName: String?
         let senderName: String?
+        let mission: MissionProfileDTO?
+    }
+
+    private struct MissionParseRequest: Encodable {
+        let clientId: String
+        let rawText: String
+    }
+
+    private struct MissionCurrentRequest: Encodable {
+        let clientId: String
+    }
+
+    private struct ScoreRequest: Encodable {
+        let id: String
+        let clientId: String?
+        let mission: MissionProfileDTO
+    }
+
+    private struct FollowUpStatusRequest: Encodable {
+        let id: String
+        let status: String
+        let editedOutreach: OutreachDraftDTO?
+        let sentAt: Double?
     }
 
     /// Decodes a `ScanMemory | null` response (the notes endpoint returns null
@@ -270,6 +333,15 @@ final class ConvexBackend: ReccoBackend {
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
             value = container.decodeNil() ? nil : try container.decode(ScanMemoryDTO.self)
+        }
+    }
+
+    /// Decodes a `MissionProfile | null` response.
+    private struct NullableMission: Decodable {
+        let value: MissionProfileDTO?
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            value = container.decodeNil() ? nil : try container.decode(MissionProfileDTO.self)
         }
     }
 }
