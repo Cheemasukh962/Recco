@@ -37,14 +37,26 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 
 # Model pack. buffalo_l is the default; set RECCO_CV_MODEL=buffalo_s for a
-# faster/lighter pack on constrained machines.
-MODEL_NAME = os.environ.get("RECCO_CV_MODEL", "buffalo_l")
+# Default is buffalo_s: it emits the same 512-d ArcFace embedding as buffalo_l
+# but uses a MobileFaceNet recognition net that is ~4x faster on CPU
+# (~380ms warm vs ~1.7s for buffalo_l on a 16-core machine), which is what
+# keeps us under the 800ms demo target. Set RECCO_CV_MODEL=buffalo_l for the
+# highest-accuracy ResNet50 recognition net. IMPORTANT: enrollment and live
+# matching MUST use the same model — embeddings from buffalo_s and buffalo_l
+# are not comparable.
+MODEL_NAME = os.environ.get("RECCO_CV_MODEL", "buffalo_s")
 
-# Detector input size. Larger -> more accurate, slower.
-DET_SIZE = int(os.environ.get("RECCO_CV_DET_SIZE", "640"))
+# Detector input size. Larger -> better at finding small/distant faces, slower.
+# 320 is plenty for the pre-cropped faces iOS sends and roughly halves detector
+# cost vs 640. Raise to 640 if you feed full frames with small faces.
+DET_SIZE = int(os.environ.get("RECCO_CV_DET_SIZE", "320"))
 
 # Minimum detection confidence to treat a face as usable.
 MIN_DET_SCORE = float(os.environ.get("RECCO_CV_MIN_DET_SCORE", "0.30"))
+
+# Run one dummy inference at startup so the first real request is warm
+# (avoids paying onnxruntime graph-optimization/allocation cost on request 1).
+WARMUP = os.environ.get("RECCO_CV_WARMUP", "1") not in ("0", "false", "False")
 
 # Embedding dimensionality guaranteed by the contract.
 EMBED_DIM = 512
@@ -70,17 +82,50 @@ def _load_model() -> None:
         # heavy native deps are not installed yet.
         from insightface.app import FaceAnalysis
 
-        face_app = FaceAnalysis(name=MODEL_NAME)
+        # Pin to the CPU execution provider explicitly. onnxruntime's CPU EP
+        # uses all physical cores for intra-op parallelism by default, which is
+        # what we want for low single-request latency.
+        face_app = FaceAnalysis(
+            name=MODEL_NAME, providers=["CPUExecutionProvider"]
+        )
         # ctx_id < 0 forces CPU; the demo machine has no guaranteed GPU.
         face_app.prepare(ctx_id=-1, det_size=(DET_SIZE, DET_SIZE))
 
         _face_app = face_app
         _model_ready = True
         _load_error = None
+
+        if WARMUP:
+            _warmup(face_app)
     except Exception as exc:  # pragma: no cover - environment dependent
         _face_app = None
         _model_ready = False
         _load_error = f"{type(exc).__name__}: {exc}"
+
+
+def _warmup(face_app: Any) -> None:
+    """Run several dummy inferences so the first real request doesn't pay the
+    one-time onnxruntime cost (graph optimization + memory-arena growth +
+    thread-pool spin-up). The CPU arena stabilizes after a few passes, so a
+    single warmup pass is not enough — we loop. Best-effort: never fatal."""
+    try:
+        rec = None
+        for model in getattr(face_app, "models", {}).values():
+            if hasattr(model, "get_feat"):
+                rec = model
+                break
+
+        det = np.zeros((DET_SIZE, DET_SIZE, 3), dtype=np.uint8)
+        face112 = np.zeros((112, 112, 3), dtype=np.uint8)
+
+        # Loop so the onnxruntime CPU arena/thread pool fully warms.
+        for _ in range(4):
+            face_app.get(det)              # warm the detection graph
+            if rec is not None:
+                rec.get_feat(face112)      # warm the ArcFace recognition graph
+    except Exception:
+        # Warmup is an optimization, not a correctness requirement.
+        pass
 
 
 @app.on_event("startup")

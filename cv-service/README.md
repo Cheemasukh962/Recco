@@ -7,9 +7,16 @@ Person B's Convex backend (`vision:matchFace`) calls this service, then
 compares the returned embedding against the enrolled roster with cosine
 similarity. This service **never stores roster data** — matching is not its job.
 
-- Default model pack: `buffalo_l` (RetinaFace detector + ArcFace `w600k_r50`)
+- Default model pack: `buffalo_s` (RetinaFace detector + ArcFace MobileFaceNet)
+  — ~380ms warm on CPU. Set `RECCO_CV_MODEL=buffalo_l` for the higher-accuracy
+  ResNet50 net (~1.7s warm).
 - Embedding: 512 floats, **L2-normalized**, finite values only
 - Endpoints: `GET /health`, `POST /embed`, `POST /debug/detect` (optional)
+
+> **Model consistency (important for Person B):** enrollment and live matching
+> must use the **same** `RECCO_CV_MODEL`. Embeddings from `buffalo_s` and
+> `buffalo_l` are not comparable. Since both enrollment and matching call this
+> one service, just don't change the model between enrolling and demoing.
 
 ---
 
@@ -42,17 +49,30 @@ launches are fast. `/health` reports `ready: true` once the model is loaded.
 
 ## Configuration (environment variables)
 
-| Variable                  | Default      | Meaning                                            |
-|---------------------------|--------------|----------------------------------------------------|
-| `RECCO_CV_MODEL`          | `buffalo_l`  | InsightFace model pack. Use `buffalo_s` if slow.   |
-| `RECCO_CV_DET_SIZE`       | `640`        | Detector input size (square). Larger = slower.     |
-| `RECCO_CV_MIN_DET_SCORE`  | `0.30`       | Min detector confidence to treat a face as usable. |
+| Variable                  | Default      | Meaning                                                  |
+|---------------------------|--------------|----------------------------------------------------------|
+| `RECCO_CV_MODEL`          | `buffalo_s`  | InsightFace model pack. `buffalo_l` = higher accuracy.   |
+| `RECCO_CV_DET_SIZE`       | `320`        | Detector input size (square). Larger = slower.           |
+| `RECCO_CV_MIN_DET_SCORE`  | `0.30`       | Min detector confidence to treat a face as usable.       |
+| `RECCO_CV_WARMUP`         | `1`          | Run dummy inferences at startup so call #1 is fast.      |
 
-Example (faster, lighter):
+Example (highest accuracy, slower):
 
 ```bash
-RECCO_CV_MODEL=buffalo_s RECCO_CV_DET_SIZE=480 uvicorn main:app --port 8000
+RECCO_CV_MODEL=buffalo_l RECCO_CV_DET_SIZE=640 uvicorn main:app --port 8000
 ```
+
+### Performance (16-core CPU, single face crop, warm)
+
+| Config                     | Warm median | First call |
+|----------------------------|-------------|------------|
+| `buffalo_s` @ det 320 (default) | **~380ms** | ~1.1s   |
+| `buffalo_l` @ det 320      | ~1.1s       | ~1.5s      |
+| `buffalo_l` @ det 640      | ~1.7s       | ~1.9s      |
+
+Startup runs a looped warmup so the first request doesn't pay onnxruntime's
+one-time arena/thread-pool cost. iOS should still cache a strong match per face
+track (per the camera rules) rather than re-embedding every frame.
 
 ---
 
