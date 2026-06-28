@@ -56,14 +56,8 @@ This is not a landing page or dashboard demo. The product is the AR lens.
 | Deepgram | Ready when env is set | Streaming speech-to-text from the iPhone mic. |
 
 The iOS app does **not** contain OpenAI, Fiber, or Deepgram secrets. Those live
-in Convex environment variables. The app only talks to the public Convex HTTP
+in Convex environment variables. Configure the app with your own Convex HTTP
 Actions URL.
-
-Current public demo backend:
-
-```txt
-https://fabulous-hyena-861.convex.site
-```
 
 ## Repository Layout
 
@@ -152,12 +146,6 @@ Deploy/update the Convex dev deployment:
 
 ```bash
 npx convex dev --once --typecheck=disable
-```
-
-Health check:
-
-```bash
-curl https://fabulous-hyena-861.convex.site/api/health
 ```
 
 Seed the roster:
@@ -267,8 +255,9 @@ Backend:
 cd backend
 npm run typecheck
 npm test
-curl https://fabulous-hyena-861.convex.site/api/health
-curl https://fabulous-hyena-861.convex.site/api/people
+BASE=https://<your-convex-deployment>.convex.site
+curl "$BASE/api/health"
+curl "$BASE/api/people"
 ```
 
 CV:

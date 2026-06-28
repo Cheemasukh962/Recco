@@ -2,16 +2,8 @@ import SwiftUI
 
 @main
 struct ReccoApp: App {
-    /// Public Convex HTTP Actions origin for the hackathon deployment.
-    ///
-    /// This is not a secret: it is the backend's public HTTPS endpoint. Keeping
-    /// it as an installed-app fallback means Recco still works after unplugging
-    /// the iPhone from Xcode and launching from the home screen.
-    private static let installedDemoBackendURL =
-        URL(string: "https://fabulous-hyena-861.convex.site")!
-
-    /// The one shared model for the whole app. Defaults to the live demo path so
-    /// a TestFlight/dev-installed build works without Xcode environment vars.
+    /// The one shared model for the whole app. Public builds do not hard-code a
+    /// backend deployment URL; provide one with `RECCO_API_BASE_URL`.
     @State private var appModel = AppModel(
         demoMode: ReccoApp.initialDemoMode(),
         apiBaseURL: ReccoApp.apiBaseURL()
@@ -36,9 +28,8 @@ struct ReccoApp: App {
         return .live
     }
 
-    /// Backend base URL. Prefers `RECCO_API_BASE_URL` (Person C's HTTP bridge),
-    /// falls back to the existing `CONVEX_URL`, then to the public hackathon
-    /// deployment so the installed app works when launched without Xcode.
+    /// Backend base URL. Prefers `RECCO_API_BASE_URL` (HTTP Actions origin),
+    /// then `CONVEX_URL`. If neither is set, the app runs in local fallback mode.
     private static func apiBaseURL() -> URL? {
         let env = ProcessInfo.processInfo.environment
         let candidates = [env["RECCO_API_BASE_URL"], env["CONVEX_URL"]]
@@ -46,6 +37,6 @@ struct ReccoApp: App {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty, let url = URL(string: trimmed) { return url }
         }
-        return installedDemoBackendURL
+        return nil
     }
 }

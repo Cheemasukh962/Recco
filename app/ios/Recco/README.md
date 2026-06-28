@@ -47,9 +47,9 @@ xcrun devicectl device process launch \
   --terminate-existing com.recco.app
 ```
 
-The installed app can run after the cable is disconnected. `ReccoApp.swift`
-falls back to the public demo backend if no Xcode environment variable is
-provided.
+The installed app can run after the cable is disconnected when it was built with
+your own backend URL configuration. Public source does not include a hard-coded
+deployment URL.
 
 ## Runtime Configuration
 
@@ -57,7 +57,8 @@ The app resolves its backend base URL in this order:
 
 1. `RECCO_API_BASE_URL`
 2. `CONVEX_URL`
-3. installed fallback: `https://fabulous-hyena-861.convex.site`
+
+If neither value is set, the app runs in local fallback mode.
 
 Optional launch mode:
 
@@ -65,14 +66,14 @@ Optional launch mode:
 DEMO_MODE=live | mockCV | mockAll
 ```
 
-The current installed-demo path should use `live`.
+Live demos should use `DEMO_MODE=live` with `RECCO_API_BASE_URL` set.
 
 No OpenAI, Fiber, Deepgram, or CV secrets belong in iOS. Those live in Convex.
 
 ## App Structure
 
 ```txt
-ReccoApp.swift                 app entry and backend URL fallback
+ReccoApp.swift                 app entry and backend URL resolution
 Camera/                        AVFoundation camera, Vision tracking, crops
 State/AppModel.swift           shared observable app state
 State/Backend/ConvexBackend    HTTP client for Convex Actions

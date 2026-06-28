@@ -32,8 +32,9 @@ Current verified result:
 Focused live checks:
 
 ```bash
-curl https://fabulous-hyena-861.convex.site/api/health
-curl https://fabulous-hyena-861.convex.site/api/people
+BASE=https://<your-convex-deployment>.convex.site
+curl "$BASE/api/health"
+curl "$BASE/api/people"
 ```
 
 - [x] `/api/health` returns JSON with `ok: true`.

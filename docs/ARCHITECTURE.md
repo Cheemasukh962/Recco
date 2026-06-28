@@ -64,8 +64,8 @@ Key areas:
 Launch behavior:
 
 - Default mode is live unless `DEMO_MODE` overrides it.
-- The app prefers `RECCO_API_BASE_URL`, then `CONVEX_URL`, then the public demo
-  backend baked into `ReccoApp.swift`.
+- The app prefers `RECCO_API_BASE_URL`, then `CONVEX_URL`. Public source does
+  not include a baked-in backend deployment.
 - Secrets are never stored in iOS.
 
 ## Backend
@@ -248,6 +248,7 @@ Use [QA Checklist](QA_CHECKLIST.md) before demo:
 cd backend
 npm run typecheck
 npm test
-curl https://fabulous-hyena-861.convex.site/api/health
+BASE=https://<your-convex-deployment>.convex.site
+curl "$BASE/api/health"
 curl http://<cv-host>:8000/health
 ```

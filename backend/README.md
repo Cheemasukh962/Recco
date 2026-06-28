@@ -24,12 +24,6 @@ Run/update Convex:
 npx convex dev --once --typecheck=disable
 ```
 
-Health:
-
-```bash
-curl https://fabulous-hyena-861.convex.site/api/health
-```
-
 ## What Lives Here
 
 ```txt
@@ -146,7 +140,7 @@ Current suite:
 Live smoke:
 
 ```bash
-BASE=https://fabulous-hyena-861.convex.site
+BASE=https://<your-convex-deployment>.convex.site
 curl "$BASE/api/health"
 curl "$BASE/api/people"
 ```

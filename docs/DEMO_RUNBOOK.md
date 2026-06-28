@@ -33,11 +33,7 @@ mission setup -> camera target lock -> voice/typed command
 | Keys | OpenAI, Fiber, and Deepgram keys set in Convex env. |
 | Network | iPhone has internet; CV service public URL is reachable from Convex. |
 
-Current demo backend:
-
-```txt
-https://fabulous-hyena-861.convex.site
-```
+Use your own Convex HTTP Actions URL for `BASE` during the demo.
 
 ## Environment
 
@@ -75,8 +71,9 @@ npm ci
 npm run typecheck
 npm test
 npx convex dev --once --typecheck=disable
-curl https://fabulous-hyena-861.convex.site/api/health
-curl https://fabulous-hyena-861.convex.site/api/people
+BASE=https://<your-convex-deployment>.convex.site
+curl "$BASE/api/health"
+curl "$BASE/api/people"
 ```
 
 Expected:
@@ -235,7 +232,7 @@ For Lazy GTM:
 
 ## Final Pre-Show Checklist
 
-- [ ] `curl https://fabulous-hyena-861.convex.site/api/health` returns OK.
+- [ ] `curl "$BASE/api/health"` returns OK.
 - [ ] `curl http://<cv-host>:8000/health` returns ready.
 - [ ] iPhone app launches from the home screen.
 - [ ] Camera permission granted.

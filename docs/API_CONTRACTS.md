@@ -3,15 +3,9 @@
 This is the shared contract between the iOS app, Convex backend, CV service, and
 demo/debug tooling.
 
-The iOS app talks to Convex over HTTP JSON through the `.convex.site` HTTP
+The iOS app talks to Convex over HTTP JSON through your `.convex.site` HTTP
 Actions origin. It does not use the Convex client SDK and does not hold secret
-API keys.
-
-Current demo backend:
-
-```txt
-https://fabulous-hyena-861.convex.site
-```
+API keys. Configure the base URL with `RECCO_API_BASE_URL` or `CONVEX_URL`.
 
 ---
 

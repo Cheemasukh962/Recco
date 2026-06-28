@@ -33,8 +33,8 @@ Then open: <http://localhost:5174>
 ## What it does
 
 ### 1. Configuration
-- **Convex base URL** — default `https://fabulous-hyena-861.convex.site`
-- **CV service base URL** — default `http://18.118.12.102:8000`
+- **Convex base URL** — enter your Convex HTTP Actions URL, e.g. `https://<your-convex-deployment>.convex.site`
+- **CV service base URL** — enter your CV service URL, e.g. `http://<cv-host>:8000`
 - **Track ID** — auto-filled `dbg_<timestamp>_<rand>`, regenerated after each resolve
 - **Transcript / name hint** — default `find info on him`
 - **Image MIME**, **max dimension**, **JPEG quality** — control client-side compression
@@ -96,7 +96,7 @@ the rest of the pipeline.
 - **Convex** (`/api/*`) already returns `Access-Control-Allow-Origin: *`, so the
   health/people/resolve calls work from the browser with no changes.
 - **The CV service has no CORS headers**, so the browser's **Direct CV test** call to
-  `http://18.118.12.102:8000/embed` is blocked by a CORS preflight until the service is
+  `http://<cv-host>:8000/embed` is blocked by a CORS preflight until the service is
   updated. This does **not** affect the main resolve flow — Convex calls the CV service
   **server-side**, where CORS is irrelevant.
 
@@ -118,7 +118,7 @@ Redeploy the EC2 CV service for that to take effect. If you can't redeploy, just
 
 ```bash
 B64=$(base64 -i face.jpg | tr -d '\n')
-curl -s http://18.118.12.102:8000/embed \
+curl -s http://<cv-host>:8000/embed \
   -H 'Content-Type: application/json' \
   -d "{\"imageBase64\":\"$B64\",\"imageMimeType\":\"image/jpeg\",\"requestId\":\"t1\"}" | jq '.faceDetected, .quality, (.embedding|length)'
 ```

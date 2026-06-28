@@ -67,8 +67,8 @@
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "RECCO_API_BASE_URL"
-            value = "https://fabulous-hyena-861.convex.site"
-            isEnabled = "YES">
+            value = ""
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
