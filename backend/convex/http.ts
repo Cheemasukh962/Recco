@@ -34,6 +34,9 @@ import {
   parseInterpretRequest,
   parseMatchFaceRequest,
   parseOpenerRequest,
+  parseScanMemoryUpsertRequest,
+  parseUpdateNotesRequest,
+  parseGenerateOutreachRequest,
   sanitizeMatchResult,
 } from "./lib/http.js";
 
@@ -160,6 +163,43 @@ route(
   "/api/voice/deepgram-token",
   "POST",
   jsonAction(async (ctx) => ctx.runAction(api.voice.getDeepgramToken, {})),
+);
+
+// --- GET /api/brain/memories  -> ScanMemory[] -------------------------------
+route(
+  "/api/brain/memories",
+  "GET",
+  jsonAction(async (ctx) => ctx.runQuery(api.scanMemories.list, {})),
+);
+
+// --- POST /api/brain/memories/upsert  -> ScanMemory -------------------------
+route(
+  "/api/brain/memories/upsert",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseScanMemoryUpsertRequest(await readJsonBody(request));
+    return ctx.runMutation(api.scanMemories.upsertFromIdentityResult, args);
+  }),
+);
+
+// --- POST /api/brain/memories/notes  -> ScanMemory | null -------------------
+route(
+  "/api/brain/memories/notes",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseUpdateNotesRequest(await readJsonBody(request));
+    return ctx.runMutation(api.scanMemories.updateNotes, args);
+  }),
+);
+
+// --- POST /api/brain/memories/outreach  -> OutreachDraft --------------------
+route(
+  "/api/brain/memories/outreach",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseGenerateOutreachRequest(await readJsonBody(request));
+    return ctx.runAction(api.scanMemories.generateOutreach, args);
+  }),
 );
 
 export default http;

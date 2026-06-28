@@ -15,6 +15,7 @@ import {
   brainStateValidator,
   faceMatchResultValidator,
   filterCommandValidator,
+  outreachDraftValidator,
   personLinksValidator,
 } from "./validators.js";
 
@@ -76,6 +77,36 @@ export default defineSchema({
     latencyMs: v.optional(v.union(v.number(), v.null())),
     createdAt: v.number(),
   }).index("by_trackId", ["trackId"]),
+
+  // Durable "event memory": one row per resolved person, deduped by LinkedIn
+  // (then normalized name+company). Stores extracted metadata, links, scores,
+  // notes, and generated outreach — NEVER raw face/badge images.
+  scanMemories: defineTable({
+    scanId: v.string(),
+    personId: v.optional(v.union(v.string(), v.null())),
+    name: v.optional(v.union(v.string(), v.null())),
+    headline: v.optional(v.union(v.string(), v.null())),
+    role: v.optional(v.union(v.string(), v.null())),
+    company: v.optional(v.union(v.string(), v.null())),
+    school: v.optional(v.union(v.string(), v.null())),
+    linkedinUrl: v.optional(v.union(v.string(), v.null())),
+    email: v.optional(v.union(v.string(), v.null())),
+    confidence: v.string(),
+    confidenceScore: v.optional(v.union(v.number(), v.null())),
+    sources: v.array(v.string()),
+    notes: v.optional(v.union(v.string(), v.null())),
+    badgeText: v.optional(v.union(v.string(), v.null())),
+    outreach: v.optional(v.union(outreachDraftValidator, v.null())),
+    // Normalized dedup keys (server-side only; never returned to iOS).
+    linkedinKey: v.optional(v.union(v.string(), v.null())),
+    nameCompanyKey: v.optional(v.union(v.string(), v.null())),
+    firstScannedAt: v.number(),
+    lastScannedAt: v.number(),
+    scanCount: v.number(),
+  })
+    .index("by_linkedinKey", ["linkedinKey"])
+    .index("by_nameCompanyKey", ["nameCompanyKey"])
+    .index("by_lastScannedAt", ["lastScannedAt"]),
 });
 
 // Re-export so callers can build args that match the stored filter shape.

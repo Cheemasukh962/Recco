@@ -15,6 +15,7 @@
  */
 
 import type { FaceMatchResult, FilterCommand } from "./types.js";
+import type { ScanMemoryUpsertInput } from "./scanMemory.js";
 
 /** An error carrying the HTTP status the bridge should return. */
 export class HttpError extends Error {
@@ -238,6 +239,84 @@ export function parseMatchFaceRequest(body: unknown): {
       : `trk_${Date.now()}`;
 
   return { imageBase64: root.imageBase64, imageMimeType, trackId };
+}
+
+/** Coerce a value to a trimmed string, or null. */
+function optString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * Validate the body of `POST /api/brain/memories/upsert`. `scanId` and `status`
+ * are required; every other field is optional metadata (text/links/scores only,
+ * never images). Unknown fields are ignored.
+ */
+export function parseScanMemoryUpsertRequest(
+  body: unknown,
+): ScanMemoryUpsertInput {
+  const root = asObject(body);
+  if (typeof root.scanId !== "string" || root.scanId.length === 0) {
+    throw new HttpError(400, "`scanId` must be a non-empty string");
+  }
+  if (typeof root.status !== "string" || root.status.length === 0) {
+    throw new HttpError(400, "`status` must be a non-empty string");
+  }
+  return {
+    scanId: root.scanId,
+    status: root.status,
+    name: optString(root.name),
+    headline: optString(root.headline),
+    role: optString(root.role),
+    company: optString(root.company),
+    school: optString(root.school),
+    linkedinUrl: optString(root.linkedinUrl),
+    email: optString(root.email),
+    confidenceScore:
+      typeof root.confidenceScore === "number" ? root.confidenceScore : null,
+    personId: optString(root.personId),
+    transcript: optString(root.transcript),
+    badgeText: optString(root.badgeText),
+    hadFaceVerification: root.hadFaceVerification === true,
+    candidateCount:
+      typeof root.candidateCount === "number" ? root.candidateCount : 0,
+  };
+}
+
+/** Validate the body of `POST /api/brain/memories/notes`. */
+export function parseUpdateNotesRequest(body: unknown): {
+  id: string;
+  notes: string | null;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  if (root.notes !== null && typeof root.notes !== "string") {
+    throw new HttpError(400, "`notes` must be a string or null");
+  }
+  return { id: root.id, notes: (root.notes as string | null) ?? null };
+}
+
+/** Validate the body of `POST /api/brain/memories/outreach`. */
+export function parseGenerateOutreachRequest(body: unknown): {
+  id: string;
+  eventName?: string | null;
+  senderName?: string | null;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  const out: { id: string; eventName?: string | null; senderName?: string | null } = {
+    id: root.id,
+  };
+  if (root.eventName === null || typeof root.eventName === "string") {
+    out.eventName = root.eventName as string | null;
+  }
+  if (root.senderName === null || typeof root.senderName === "string") {
+    out.senderName = root.senderName as string | null;
+  }
+  return out;
 }
 
 /**

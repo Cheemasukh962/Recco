@@ -140,6 +140,46 @@ export const faceVerificationValidator = v.object({
   message: v.optional(v.union(v.string(), v.null())),
 });
 
+// ---------------------------------------------------------------------------
+// Brain scan memory ("event memory").
+// ---------------------------------------------------------------------------
+
+/** Validator for a generated outreach draft (3 variants). */
+export const outreachDraftValidator = v.object({
+  linkedinDm: v.string(),
+  coldEmailSubject: v.string(),
+  coldEmail: v.string(),
+  inPersonOpener: v.string(),
+  generatedAt: v.number(),
+});
+
+/**
+ * Validator for a public scan memory returned to iOS. `id` is the Convex
+ * document id as a string. Dedup keys are NOT exposed. Metadata/links/scores
+ * only — never raw images.
+ */
+export const scanMemoryValidator = v.object({
+  id: v.string(),
+  scanId: v.string(),
+  personId: v.optional(v.union(v.string(), v.null())),
+  name: v.optional(v.union(v.string(), v.null())),
+  headline: v.optional(v.union(v.string(), v.null())),
+  role: v.optional(v.union(v.string(), v.null())),
+  company: v.optional(v.union(v.string(), v.null())),
+  school: v.optional(v.union(v.string(), v.null())),
+  linkedinUrl: v.optional(v.union(v.string(), v.null())),
+  email: v.optional(v.union(v.string(), v.null())),
+  confidence: v.string(),
+  confidenceScore: v.optional(v.union(v.number(), v.null())),
+  sources: v.array(v.string()),
+  notes: v.optional(v.union(v.string(), v.null())),
+  badgeText: v.optional(v.union(v.string(), v.null())),
+  outreach: v.optional(v.union(outreachDraftValidator, v.null())),
+  firstScannedAt: v.number(),
+  lastScannedAt: v.number(),
+  scanCount: v.number(),
+});
+
 /** Validator for IdentityResolveResult (response of /api/identity/resolve). */
 export const identityResolveResultValidator = v.object({
   trackId: v.string(),
