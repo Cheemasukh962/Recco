@@ -2,7 +2,12 @@
 
 # Recco
 
+
 **An iPhone AR networking assistant for hackathon and event floors.**
+
+
+<img width="365" height="703" alt="image" src="https://github.com/user-attachments/assets/6c468322-d628-4d3a-b242-5cdf2bb9d6f2" />
+
 
 Point the camera at someone, say what you want, and Recco locks the target,
 reads context from the scene, looks up identity data, saves the scan to a Brain
